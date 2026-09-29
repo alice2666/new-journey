@@ -89,15 +89,17 @@
 
   /* 台词文本区。#chat 与画面底边贴齐（top:400 + 高 496 = 896），
      所以弹窗内的 left/bottom 就等于画布坐标：
-       left   380px            -> 左边缘距画面左 380px
-       width  640px            -> 右边缘 = 380+640 = 1020，距画面右 180px
-       bottom 120px            -> 底边距画面底 120px
-     用 bottom 锚定而非固定 top/height：文字行数变化时底边距恒定不变。 */
+       left   380px  -> 左边缘距画面左 380px（让开左侧角色立绘，其最右到 x=350）
+       width  640px  -> 右边缘 = 380+640 = 1020，距画面右 180px（让开 GO 按钮 x1062）
+       bottom 70px   -> 底边距画面底 70px（原为 120，按需求整体下移 50px）
+     用 bottom 锚定而非固定 top/height：文字行数变化时底边距恒定不变。
+     实测底板（浅蓝）上沿在画布 y=718；「Luna」姓名牌占 y690-755 / x351-523，
+     下面的数值必须保证文字落在底板内、且纵向让开姓名牌。 */
   #chat-text {
     position: absolute;
     left: 380px;
     width: 640px;
-    bottom: 120px;
+    bottom: 70px;
     margin: 0;
     font-size: 28px; line-height: 1.35;
     font-weight: 600; letter-spacing: .2px;

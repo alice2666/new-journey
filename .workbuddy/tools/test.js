@@ -117,6 +117,28 @@ const EFF_OPACITY_FN = `(() => {
   return +o.toFixed(4);
 })()`;
 
+// 文字「墨迹」相对元素顶边的偏移（px）。
+// 行盒 = 半行距 + 字体上下沿，字体上下沿里的空白是透明的，
+// 所以判断文字有没有「压倒」别的东西必须看墨迹，不能看行盒。
+// 用 canvas measureText 拿到真实的 actualBoundingBoxAscent / fontBoundingBoxAscent 来算。
+const INK_TOP_FN = `(() => {
+  const el = document.querySelector(SEL);
+  const cs = getComputedStyle(el);
+  const ctx = document.createElement('canvas').getContext('2d');
+  ctx.font = cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+  const m = ctx.measureText((el.textContent || '').trim() || 'Th');
+  const lineBox = parseFloat(cs.lineHeight);
+  const contentH = m.fontBoundingBoxAscent + m.fontBoundingBoxDescent;
+  const halfLeading = (lineBox - contentH) / 2;
+  const baseline = halfLeading + m.fontBoundingBoxAscent;
+  return {
+    inkTopOffset: +(baseline - m.actualBoundingBoxAscent).toFixed(2),
+    lineBox: +lineBox.toFixed(2),
+    baselineOffset: +baseline.toFixed(2),
+    inkAscent: m.actualBoundingBoxAscent
+  };
+})()`;
+
 /* ================= 主流程 ================= */
 (async () => {
   const which = process.argv.slice(2).filter((a) => !a.startsWith('-'));
@@ -180,6 +202,7 @@ const EFF_OPACITY_FN = `(() => {
   };
 
   const box = (sel) => evaluate(LAYOUT_FN.replace('SEL', JSON.stringify(sel)));
+  const inkOf = (sel) => evaluate(INK_TOP_FN.replace('SEL', JSON.stringify(sel)));
   const effOpacity = (sel) => evaluate(EFF_OPACITY_FN.replace('SEL', JSON.stringify(sel)));
   const textOf = (sel) => evaluate(`document.querySelector(${JSON.stringify(sel)}).textContent`);
   const classesOf = (sel) => evaluate(`document.querySelector(${JSON.stringify(sel)}).className`);
@@ -238,7 +261,35 @@ const EFF_OPACITY_FN = `(() => {
     await sleep(400);
   };
 
-  /* ================= 用例 p1：台词文本位置 ================= */
+  /* ================= 用例 p1：台词文本位置 =================
+     需求：整体下移 50px（bottom 120 -> 70），且「只能在浅蓝色底板上，不能压倒其他物件」。
+     下列参照物边界均来自对 assets/screen2/chat.png 的像素实测，已换算为画布坐标。 */
+  const PANEL_BLUE_TOP = 718;      // 浅蓝底板上沿
+  const PANEL_BLUE_BOTTOM = 896;   // 浅蓝底板下沿 = 画面底边
+  const LUNA_NAME_PLATE = { left: 351, right: 523, top: 690, bottom: 755 };
+  const LUNA_ART_RIGHT = 350;      // 角色立绘在面板区的最右像素
+  const GO_BUTTON = { left: 1062, right: 1100, top: 799, bottom: 846 };
+
+  const edgesOf = (b) => ({ left: b.left, top: b.top, right: b.left + b.width, bottom: b.top + b.height });
+  const overlaps = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+  const fmtRect = (r) => 'x' + r.left + '-' + r.right + ' / y' + r.top + '-' + r.bottom;
+
+  // 「只在底板上、不压物件」这组硬约束，第 1、2 句都必须满足。
+  // boxTop 是行盒顶边（含字体上下留白，透明），inkTop 才是第一行字真正的墨迹顶边。
+  function assertOnPanelOnly(label, e, inkTop) {
+    assertTrue(label + ' 完全落在浅蓝底板上（墨迹顶边 ' + inkTop + ' >= 底板上沿 ' + PANEL_BLUE_TOP + '）',
+      inkTop >= PANEL_BLUE_TOP, '墨迹顶边 ' + inkTop + ' 高于底板上沿 ' + PANEL_BLUE_TOP);
+    assertTrue(label + ' 底边不超出画面（' + e.bottom + ' <= ' + PANEL_BLUE_BOTTOM + '）',
+      e.bottom <= PANEL_BLUE_BOTTOM, '文字底边 ' + e.bottom);
+    assertTrue(label + ' 不压倒「Luna」姓名牌（墨迹顶边 ' + inkTop + ' >= 牌底 ' + LUNA_NAME_PLATE.bottom + '）',
+      inkTop >= LUNA_NAME_PLATE.bottom,
+      '文本框 y' + e.top + '-' + e.bottom + '，墨迹顶边 ' + inkTop + '，姓名牌底 ' + LUNA_NAME_PLATE.bottom);
+    assertTrue(label + ' 不压倒左侧角色立绘（左边界 ' + e.left + ' > ' + LUNA_ART_RIGHT + '）',
+      e.left > LUNA_ART_RIGHT, '文字左边界 ' + e.left);
+    assertTrue(label + ' 不压倒 GO 按钮',
+      !overlaps(e, GO_BUTTON), '文字 ' + fmtRect(e) + ' vs GO 按钮 ' + fmtRect(GO_BUTTON));
+  }
+
   async function caseP1() {
     await toAct2FirstLine();
     await shot('p1-1-line1');
@@ -246,11 +297,13 @@ const EFF_OPACITY_FN = `(() => {
     assertEq('p1 第1句 文案与需求一致（含弯引号）', await textOf('#chat-text') === LINE1 ? 1 : 0, 1, 0);
 
     const t1 = await box('#chat-text');
+    const ink1 = await inkOf('#chat-text');
     assertEq('p1 第1句 左边缘距画面左 = 380', t1.left, 380);
     assertEq('p1 第1句 右边缘距画面右 = 180', t1.fromRight, 180);
-    assertEq('p1 第1句 底边距画面底 = 120', t1.fromBottom, 120);
+    assertEq('p1 第1句 底边距画面底 = 70（由 120 下移 50px）', t1.fromBottom, 70);
     assertEq('p1 第1句 文本区宽度 = 640', t1.width, 640);
     assertEq('p1 第1句 右边缘绝对坐标 = 1020', t1.left + t1.width, 1020, 0);
+    assertOnPanelOnly('p1 第1句', edgesOf(t1), +(t1.top + ink1.inkTopOffset).toFixed(2));
 
     // 第 2 句更长、行数可能不同，同一组约束必须依然成立（底边用 bottom 锚定，与行数无关）
     await clickAndWaitHide('#btn-go');
@@ -261,11 +314,13 @@ const EFF_OPACITY_FN = `(() => {
     assertEq('p1 第2句 文案与需求一致', await textOf('#chat-text') === LINE2 ? 1 : 0, 1, 0);
 
     const t2 = await box('#chat-text');
+    const ink2 = await inkOf('#chat-text');
     assertEq('p1 第2句 左边缘距画面左 = 380', t2.left, 380);
     assertEq('p1 第2句 右边缘距画面右 = 180', t2.fromRight, 180);
-    assertEq('p1 第2句 底边距画面底 = 120', t2.fromBottom, 120);
+    assertEq('p1 第2句 底边距画面底 = 70（由 120 下移 50px）', t2.fromBottom, 70);
     assertEq('p1 第2句 文本区宽度 = 640', t2.width, 640);
     assertEq('p1 第2句 文本区高度（2 行，随行数自适应）', t2.height, 76, 3);
+    assertOnPanelOnly('p1 第2句', edgesOf(t2), +(t2.top + ink2.inkTopOffset).toFixed(2));
   }
 
   /* ================= 用例 p2：第2次 GO -> chat 整体消失 -> hand 出现 ================= */
