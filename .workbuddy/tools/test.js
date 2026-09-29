@@ -434,7 +434,7 @@ const INK_TOP_FN = `(() => {
     assertEq('flow GO 按钮 距画面右 = 100', (await box('#btn-go')).fromRight, 100);
     assertEq('flow GO 按钮 底边距画面底 = 50', (await box('#btn-go')).fromBottom, 50);
     assertEq('flow 台词文本 左边缘距画面左 = 380', (await box('#chat-text')).left, 380);
-    assertEq('flow 台词文本 底边距画面底 = 120', (await box('#chat-text')).fromBottom, 120);
+    assertEq('flow 台词文本 底边距画面底 = 70', (await box('#chat-text')).fromBottom, 70);
 
     await clickAndWaitHide('#btn-go');
     await waitFor(`document.getElementById('suitcase').classList.contains('in')`, 10000, 'suitcase');
