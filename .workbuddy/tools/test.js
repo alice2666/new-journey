@@ -325,8 +325,15 @@ const EFF_OPACITY_FN = `(() => {
     assertEq('flow bg-start 高 = 896', (await box('#bg-start')).height, 896, 0);
 
     // 缩放：<1200x896 等比缩小，>1200x896 不放大
-    const stageScale = async () =>
-      parseFloat((await evaluate(`getComputedStyle(document.getElementById('stage')).transform`)).replace(/[^0-9.]/g, ''));
+    // 注意：computed transform 形如 "matrix(1, 0, 0, 1, 0, 0)"，必须取 matrix() 的
+    // 第一个参数；早期用「剥掉所有非数字字符」的写法会把 matrix(1,0,0,1,0,0)
+    // 拼成 100100，scale=1 时必然误判。
+    const stageScale = async () => {
+      const t = await evaluate(`getComputedStyle(document.getElementById('stage')).transform`);
+      if (t === 'none') return 1;
+      const m = /matrix\(([-\d.]+)/.exec(t);
+      return m ? parseFloat(m[1]) : NaN;
+    };
 
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 800, height: 600, deviceScaleFactor: 1, mobile: false });
     await evaluate(`window.dispatchEvent(new Event('resize'))`);
@@ -338,6 +345,12 @@ const EFF_OPACITY_FN = `(() => {
     await evaluate(`window.dispatchEvent(new Event('resize'))`);
     await sleep(350);
     assertEq('flow 缩放@1600x1000 = 1（不放大）', await stageScale(), 1, 0.002);
+    assertEq('flow 缩放@1600x1000 时内部坐标系仍为 1200',
+      await evaluate(`document.getElementById('stage').offsetWidth`), 1200, 0);
+
+    // 放大态下按 1:1 渲染：START 按钮屏幕宽度应与舞台坐标一致（未被放大）
+    assertEq('flow 放大态 START 屏幕宽 = 227（未随窗口放大）',
+      await evaluate(`document.getElementById('btn-start').getBoundingClientRect().width`), 227, 0.6);
 
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: STAGE_W, height: STAGE_H, deviceScaleFactor: 1, mobile: false });
     await evaluate(`window.dispatchEvent(new Event('resize'))`);
