@@ -74,10 +74,12 @@
     width: 1200px; height: 496px;
     z-index: 30;
     transform: translateY(110%);
-    transition: transform .6s ease-out;
+    transition: transform .6s ease-out, opacity .35s ease-out;
     pointer-events: none;              /* 纯装饰，不拦截点击 */
   }
   #chat.in { transform: translateY(0); }
+  /* 第 2 次点击 GO 后：整个 chat.png（画面 + Luna 姓名牌 + 台词）整体淡出消失 */
+  #chat.out { opacity: 0; }
 
   #chat-frame {
     position: absolute; left: 0; top: 0;
@@ -422,20 +424,24 @@
         return sleep(300);
       })
 
-      // 15. 引导手出现，行李箱变为可点击
+      // 15. 整个对话弹窗（chat.png 画面 + Luna 姓名牌 + 台词文本）淡出消失，
+      //     行李箱不再被它遮挡，在画面右侧完整露出
+      .then(function () { return anim(400, function () { chat.classList.add('out'); }); })
+
+      // 16. 然后引导手才出现，行李箱变为可点击
       .then(function () { return anim(300, function () { hand.classList.add('in'); }); })
       .then(function () {
         suitcase.classList.add('clickable');
         return waitClick(suitcase);
       })
 
-      // 16. 点击行李箱：隐藏引导手
+      // 17. 点击行李箱：隐藏引导手
       .then(function () {
         suitcase.classList.remove('clickable');
         return anim(300, function () { hand.classList.remove('in'); });
       })
 
-      // 17. 渐变全黑，之后静止（#act3-slot 保持为空）
+      // 18. 渐变全黑，之后静止（#act3-slot 保持为空）
       .then(function () { return anim(700, function () { blackout.classList.add('in'); }); })
 
       .catch(function (err) { console.error('[new-journey]', err); });
