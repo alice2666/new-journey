@@ -85,13 +85,18 @@
     pointer-events: none;
   }
 
-  /* 文本安全区：画布 (540,730,500x140) = 弹窗内 (540,330,500x140)
-     左边界避开姓名牌(x66-523)与角色(x47-350)，右边界避开 GO 按钮(x1062-1100) */
+  /* 台词文本区。#chat 与画面底边贴齐（top:400 + 高 496 = 896），
+     所以弹窗内的 left/bottom 就等于画布坐标：
+       left   380px            -> 左边缘距画面左 380px
+       width  640px            -> 右边缘 = 380+640 = 1020，距画面右 180px
+       bottom 120px            -> 底边距画面底 120px
+     用 bottom 锚定而非固定 top/height：文字行数变化时底边距恒定不变。 */
   #chat-text {
     position: absolute;
-    left: 540px; top: 330px;
-    width: 500px; height: 140px;
-    margin: 0; overflow: hidden;
+    left: 380px;
+    width: 640px;
+    bottom: 120px;
+    margin: 0;
     font-size: 28px; line-height: 1.35;
     font-weight: 600; letter-spacing: .2px;
     color: #123a72;
