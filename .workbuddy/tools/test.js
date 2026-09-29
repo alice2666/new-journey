@@ -242,6 +242,8 @@ const INK_TOP_FN = `(() => {
   /* ---------- 公共前置 ---------- */
   const LINE1 = 'Wow! I\u2019m traveling somewhere new. Let me get ready.';
   const LINE2 = 'This brand-new suitcase has no marks. Someone might take it by mistake.';
+  // 仅用于「3 行台词」回归：临时注入，验证行数增加时顶边不动、仍不压任何物件
+  const LINE3 = 'This brand-new suitcase has no marks at all. If someone takes it by mistake, I will have nothing left for my trip.';
 
   const toAct2FirstLine = async () => {
     await waitFor(`document.getElementById('btn-start').classList.contains('in')`, 20000, 'btn-start 出现');
@@ -262,7 +264,9 @@ const INK_TOP_FN = `(() => {
   };
 
   /* ================= 用例 p1：台词文本位置 =================
-     需求：整体下移 50px（bottom 120 -> 70），且「只能在浅蓝色底板上，不能压倒其他物件」。
+     需求：台词（2-3 行）整体下移 20px，且「只能在浅蓝色底板上，不能压倒其他物件」。
+     实现：文本区改用 top 锚定（top:770.4）。2 行时底边 = y846，底边距画面底 50px；
+           行数增加只向下生长，所以 2/3 行的墨迹顶边恒为 y≈776.4（原 756.4 下移 20px）。
      下列参照物边界均来自对 assets/screen2/chat.png 的像素实测，已换算为画布坐标。 */
   const PANEL_BLUE_TOP = 718;      // 浅蓝底板上沿
   const PANEL_BLUE_BOTTOM = 896;   // 浅蓝底板下沿 = 画面底边
@@ -298,14 +302,37 @@ const INK_TOP_FN = `(() => {
 
     const t1 = await box('#chat-text');
     const ink1 = await inkOf('#chat-text');
+    const inkTop1 = +(t1.top + ink1.inkTopOffset).toFixed(2);
     assertEq('p1 第1句 左边缘距画面左 = 380', t1.left, 380);
     assertEq('p1 第1句 右边缘距画面右 = 180', t1.fromRight, 180);
-    assertEq('p1 第1句 底边距画面底 = 70（由 120 下移 50px）', t1.fromBottom, 70);
+    assertEq('p1 第1句 文本区顶边 = 770.4（top 锚定）', t1.top, 770.4);
+    assertEq('p1 第1句 底边距画面底 = 50（由 70 下移 20px）', t1.fromBottom, 50);
+    assertEq('p1 第1句 墨迹顶边 ≈ 776.4（较原 756.4 下移 20px）', inkTop1, 776.4, 1.5);
     assertEq('p1 第1句 文本区宽度 = 640', t1.width, 640);
     assertEq('p1 第1句 右边缘绝对坐标 = 1020', t1.left + t1.width, 1020, 0);
-    assertOnPanelOnly('p1 第1句', edgesOf(t1), +(t1.top + ink1.inkTopOffset).toFixed(2));
+    assertOnPanelOnly('p1 第1句', edgesOf(t1), inkTop1);
 
-    // 第 2 句更长、行数可能不同，同一组约束必须依然成立（底边用 bottom 锚定，与行数无关）
+    /* ---- 3 行台词回归：注入更长文案，验证行数增加只向下生长、依然不压任何物件 ----
+       打字机此刻已完成（rAF 循环已退出），直接改写 textContent 不会被覆盖。 */
+    const lineCount = (b, ink) => Math.round(b.height / ink.lineBox);
+    await evaluate(`document.getElementById('chat-text').textContent = ${JSON.stringify(LINE3)}`);
+    await sleep(200);
+    await shot('p1-3-line3');
+
+    const t3 = await box('#chat-text');
+    const ink3 = await inkOf('#chat-text');
+    const inkTop3 = +(t3.top + ink3.inkTopOffset).toFixed(2);
+    assertEq('p1 3行 实际行数 = 3', lineCount(t3, ink3), 3, 0.2);
+    assertEq('p1 3行 文本区顶边 = 770.4（与 2 行相同，行数只向下生长）', t3.top, 770.4);
+    assertEq('p1 3行 墨迹顶边 ≈ 776.4（仍为下移 20px 后的位置）', inkTop3, 776.4, 1.5);
+    assertTrue('p1 3行 底边仍在画面内（' + (t3.top + t3.height) + ' <= ' + STAGE_H + '）',
+      t3.top + t3.height <= STAGE_H, '底边 ' + (t3.top + t3.height));
+    assertOnPanelOnly('p1 3行', edgesOf(t3), inkTop3);
+
+    // 复原为第 1 句，后续流程照常推进
+    await evaluate(`document.getElementById('chat-text').textContent = ${JSON.stringify(LINE1)}`);
+
+    // 第 2 句：同一组约束必须依然成立（顶边锚定，与行数无关）
     await clickAndWaitHide('#btn-go');
     await waitFor(`document.getElementById('btn-go').classList.contains('in')`, 25000, '第 2 句打完');
     await sleep(400);
@@ -315,12 +342,15 @@ const INK_TOP_FN = `(() => {
 
     const t2 = await box('#chat-text');
     const ink2 = await inkOf('#chat-text');
+    const inkTop2 = +(t2.top + ink2.inkTopOffset).toFixed(2);
     assertEq('p1 第2句 左边缘距画面左 = 380', t2.left, 380);
     assertEq('p1 第2句 右边缘距画面右 = 180', t2.fromRight, 180);
-    assertEq('p1 第2句 底边距画面底 = 70（由 120 下移 50px）', t2.fromBottom, 70);
+    assertEq('p1 第2句 文本区顶边 = 770.4', t2.top, 770.4);
+    assertEq('p1 第2句 底边距画面底 = 50', t2.fromBottom, 50);
+    assertEq('p1 第2句 墨迹顶边 ≈ 776.4', inkTop2, 776.4, 1.5);
     assertEq('p1 第2句 文本区宽度 = 640', t2.width, 640);
     assertEq('p1 第2句 文本区高度（2 行，随行数自适应）', t2.height, 76, 3);
-    assertOnPanelOnly('p1 第2句', edgesOf(t2), +(t2.top + ink2.inkTopOffset).toFixed(2));
+    assertOnPanelOnly('p1 第2句', edgesOf(t2), inkTop2);
   }
 
   /* ================= 用例 p2：第2次 GO -> chat 整体消失 -> hand 出现 ================= */
@@ -434,7 +464,8 @@ const INK_TOP_FN = `(() => {
     assertEq('flow GO 按钮 距画面右 = 100', (await box('#btn-go')).fromRight, 100);
     assertEq('flow GO 按钮 底边距画面底 = 50', (await box('#btn-go')).fromBottom, 50);
     assertEq('flow 台词文本 左边缘距画面左 = 380', (await box('#chat-text')).left, 380);
-    assertEq('flow 台词文本 底边距画面底 = 70', (await box('#chat-text')).fromBottom, 70);
+    assertEq('flow 台词文本 顶边 = 770.4', (await box('#chat-text')).top, 770.4);
+    assertEq('flow 台词文本 底边距画面底 = 50', (await box('#chat-text')).fromBottom, 50);
 
     await clickAndWaitHide('#btn-go');
     await waitFor(`document.getElementById('suitcase').classList.contains('in')`, 10000, 'suitcase');
