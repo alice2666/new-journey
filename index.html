@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1200, initial-scale=1">
+<title>New Journey</title>
+<style>
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    overflow: hidden; background: #000;
+  }
+
+  /* ---------- 视口：负责居中与等比缩放 ---------- */
+  #viewport {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #000;
+  }
+
+  /* ---------- 舞台：内部坐标严格 1200 x 896 ---------- */
+  #stage {
+    width: 1200px; height: 896px;
+    flex: 0 0 auto;                    /* 关键：禁止被 flex 容器压缩，否则内部坐标系会被挤成窗口尺寸 */
+    position: relative; overflow: hidden;
+    background: #000;
+    transform-origin: center center;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    user-select: none; -webkit-user-select: none;
+    cursor: default;
+  }
+
+  #stage img { display: block; -webkit-user-drag: none; }
+
+  /* ---------- 场景层 ---------- */
+  .scene { position: absolute; inset: 0; }
+
+  #act1 { opacity: 1; transition: opacity .4s ease-out; }
+  #act1.out { opacity: 0; pointer-events: none; }
+
+  /* act2 是覆盖在 act1 之上的全屏层：未激活时必须让点击穿透，
+     否则 opacity:0 也会拦截点击，导致第一幕的 START 按钮点不动 */
+  #act2 { opacity: 0; z-index: 2; transition: opacity .4s ease-out; pointer-events: none; }
+  #act2.in { opacity: 1; pointer-events: auto; }
+
+  /* ---------- 背景 ---------- */
+  #bg-start, #bg-room {
+    position: absolute; left: 0; top: 0;
+    width: 1200px; height: 896px;
+  }
+
+  /* ---------- 淡入元素默认态 ---------- */
+  #bg-start, #btn-start, #suitcase, #hand, #btn-go, #blackout { opacity: 0; }
+  #bg-start.in, #btn-start.in, #suitcase.in, #hand.in,
+  #btn-go.in, #blackout.in { opacity: 1; }
+
+  /* ---------- 第一幕 START：水平居中，底边距画布底 170px ---------- */
+  #btn-start {
+    position: absolute;
+    left: 486.5px; bottom: 170px;      /* 227x97 -> 中心 x = 600 */
+    width: 227px; height: 97px;
+    transform-origin: center center;
+    transition: opacity .4s ease-out, transform .15s ease-out;
+    pointer-events: none;
+  }
+  #btn-start.in { pointer-events: auto; cursor: pointer; }
+  #btn-start.in:hover { transform: scale(1.05); }
+  #btn-start.in:active { transform: scale(.95); }
+
+  /* ---------- 对话弹窗：自下而上滑入并贴底 ---------- */
+  #chat {
+    position: absolute; left: 0; top: 400px;
+    width: 1200px; height: 496px;
+    z-index: 30;
+    transform: translateY(110%);
+    transition: transform .6s ease-out;
+    pointer-events: none;              /* 纯装饰，不拦截点击 */
+  }
+  #chat.in { transform: translateY(0); }
+
+  #chat-frame {
+    position: absolute; left: 0; top: 0;
+    width: 1200px; height: 496px;
+    pointer-events: none;
+  }
+
+  /* 文本安全区：画布 (540,730,500x140) = 弹窗内 (540,330,500x140)
+     左边界避开姓名牌(x66-523)与角色(x47-350)，右边界避开 GO 按钮(x1062-1100) */
+  #chat-text {
+    position: absolute;
+    left: 540px; top: 330px;
+    width: 500px; height: 140px;
+    margin: 0; overflow: hidden;
+    font-size: 28px; line-height: 1.35;
+    font-weight: 600; letter-spacing: .2px;
+    color: #123a72;
+  }
+
+  /* ---------- 行李箱：距右 50px，距底 30px ---------- */
+  #suitcase {
+    position: absolute;
+    right: 50px; bottom: 30px;         /* 225x414 -> left 925, top 452 */
+    width: 225px; height: 414px;
+    z-index: 10;
+    transform: translateY(20px);
+    transition: opacity .45s ease-out, transform .45s ease-out;
+    pointer-events: none;
+  }
+  #suitcase.in { transform: translateY(0); }
+  #suitcase.clickable { pointer-events: auto; cursor: pointer; }
+  #suitcase.clickable:hover {
+    filter: brightness(1.06) drop-shadow(0 0 12px rgba(255,255,255,.65));
+  }
+
+  /* ---------- 引导手：指尖(7% 0%)为缩放原点，循环点按 ---------- */
+  #hand {
+    position: absolute;
+    left: 989px; top: 548px;           /* 165x161 -> 指尖落在行李箱拉杆上 */
+    width: 165px; height: 161px;
+    z-index: 20;
+    transform-origin: 7% 0%;
+    pointer-events: none;
+    transition: opacity .3s ease-out;
+    animation: tap .9s ease-in-out infinite;
+  }
+  @keyframes tap {
+    0%, 100% { transform: scale(1); }
+    50%      { transform: scale(.85); }
+  }
+
+  /* ---------- 推进按钮：距右 100px，距底 50px ---------- */
+  #btn-go {
+    position: absolute;
+    right: 100px; bottom: 50px;        /* 38x47 -> left 1062, top 799 */
+    width: 38px; height: 47px;
+    z-index: 40;
+    transform-origin: center center;
+    transition: opacity .3s ease-out, transform .15s ease-out;
+    pointer-events: none;
+  }
+  #btn-go.in { pointer-events: auto; cursor: pointer; }
+  #btn-go.in:hover { transform: scale(1.15); }
+  #btn-go.in:active { transform: scale(.92); }
+
+  /* ---------- 遮黑层 ---------- */
+  #blackout {
+    position: absolute; inset: 0;
+    background: #000; z-index: 100;
+    pointer-events: none;
+    transition: opacity .7s ease-out;
+  }
+  #blackout.in { pointer-events: auto; }
+
+  /* ---------- 第三幕预留容器（本阶段保持为空） ---------- */
+  #act3-slot { position: absolute; inset: 0; z-index: 110; pointer-events: none; }
+</style>
+</head>
+<body>
+
+<div id="viewport">
+  <div id="stage">
+
+    <!-- ========== 第一幕：车站站台 ========== -->
+    <section id="act1" class="scene">
+      <img id="bg-start" src="assets/screen1/bg-start.png" alt="">
+      <img id="btn-start" src="assets/screen1/btn-start.png" alt="START">
+    </section>
+
+    <!-- ========== 第二幕：房间 ========== -->
+    <section id="act2" class="scene">
+      <img id="bg-room" src="assets/screen2/bg-room.png" alt="">
+
+      <img id="suitcase" src="assets/screen2/suitcase.png" alt="">
+
+      <img id="hand" src="assets/screen2/hand.png" alt="">
+
+      <div id="chat">
+        <img id="chat-frame" src="assets/screen2/chat.png" alt="">
+        <p id="chat-text"></p>
+      </div>
+
+      <img id="btn-go" src="assets/screen2/btn-go.png" alt="GO">
+    </section>
+
+    <!-- ========== 遮黑层 ========== -->
+    <div id="blackout"></div>
+
+    <!-- ========== 第三幕预留位（空） ========== -->
+    <div id="act3-slot"></div>
+
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ================= 常量 ================= */
+  var STAGE_W = 1200;
+  var STAGE_H = 896;
+
+  var AUDIO_SRC = 'audio/toggle.wav';
+
+  var LINE1 = 'Wow! I’m traveling somewhere new. Let me get ready.';
+  var LINE2 = 'This brand-new suitcase has no marks. Someone might take it by mistake.';
+
+  var TYPE_SPEED = 40;   // ms / 字
+  var CLICK_COOLDOWN = 300;
+
+  var IMAGES = [
+    'assets/screen1/bg-start.png',
+    'assets/screen1/btn-start.png',
+    'assets/screen2/bg-room.png',
+    'assets/screen2/chat.png',
+    'assets/screen2/btn-go.png',
+    'assets/screen2/suitcase.png',
+    'assets/screen2/hand.png'
+  ];
+
+  /* ================= DOM ================= */
+  var stage     = document.getElementById('stage');
+  var act1      = document.getElementById('act1');
+  var act2      = document.getElementById('act2');
+  var bgStart   = document.getElementById('bg-start');
+  var btnStart  = document.getElementById('btn-start');
+  var chat      = document.getElementById('chat');
+  var chatText  = document.getElementById('chat-text');
+  var suitcase  = document.getElementById('suitcase');
+  var hand      = document.getElementById('hand');
+  var btnGo     = document.getElementById('btn-go');
+  var blackout  = document.getElementById('blackout');
+
+  /* ================= 运行时状态 ================= */
+  var busy = false;          // 动画 / 打字期间锁点击
+  var lastClickAt = 0;       // 点击冷却
+  var typeToken = 0;         // 打字任务令牌，防止串台
+
+  /* ================= 工具 ================= */
+  function sleep(ms) {
+    return new Promise(function (r) { setTimeout(r, ms); });
+  }
+
+  // 动画阶段：上锁 -> 执行 -> 到时解锁
+  function anim(ms, fn) {
+    busy = true;
+    if (fn) fn();
+    return sleep(ms).then(function () { busy = false; });
+  }
+
+  // 等待有效点击（含音效、防连点）
+  function waitClick(el) {
+    return new Promise(function (resolve) {
+      function handler() {
+        if (busy) return;
+        var now = Date.now();
+        if (now - lastClickAt < CLICK_COOLDOWN) return;
+        lastClickAt = now;
+        el.removeEventListener('click', handler);
+        playSound();
+        resolve();
+      }
+      el.addEventListener('click', handler);
+    });
+  }
+
+  /* ================= 等比缩放适配窗口 ================= */
+  function fitStage() {
+    // 上限 1：窗口大于 1200x896 时按 1:1 显示，绝不放大
+    var s = Math.min(window.innerWidth / STAGE_W, window.innerHeight / STAGE_H, 1);
+    stage.style.transform = 'scale(' + s + ')';
+  }
+  window.addEventListener('resize', fitStage);
+
+  /* ================= 音效（3 实例轮询，允许重叠） ================= */
+  var pool = [];
+  var poolIdx = 0;
+  (function buildPool() {
+    for (var i = 0; i < 3; i++) {
+      var a = new Audio(AUDIO_SRC);
+      a.preload = 'auto';
+      a.volume = 0.85;
+      pool.push(a);
+    }
+  })();
+
+  function playSound() {
+    var a = pool[poolIdx];
+    poolIdx = (poolIdx + 1) % pool.length;
+    try { a.currentTime = 0; } catch (e) { /* 未就绪时忽略 */ }
+    var p = a.play();
+    if (p && typeof p.catch === 'function') p.catch(function () {});
+  }
+
+  /* ================= 预加载 ================= */
+  function loadImage(src) {
+    return new Promise(function (res) {
+      var img = new Image();
+      img.onload = function () { res(); };
+      img.onerror = function () { res(); };
+      img.src = src;
+    });
+  }
+
+  function loadAudio() {
+    return new Promise(function (res) {
+      var done = false;
+      function fin() { if (!done) { done = true; res(); } }
+      var a = new Audio(AUDIO_SRC);
+      a.preload = 'auto';
+      a.addEventListener('canplaythrough', fin, { once: true });
+      a.addEventListener('loadeddata', fin, { once: true });
+      a.addEventListener('error', fin, { once: true });
+      try { a.load(); } catch (e) { fin(); }
+      setTimeout(fin, 2500);   // 兜底，绝不卡住开场
+    });
+  }
+
+  function preload() {
+    return Promise.all([Promise.all(IMAGES.map(loadImage)), loadAudio()]);
+  }
+
+  /* ================= 打字机 ================= */
+  function typeText(text, speed) {
+    speed = speed || TYPE_SPEED;
+    busy = true;
+    var my = ++typeToken;
+    chatText.textContent = '';
+
+    return new Promise(function (resolve) {
+      var startT = null;
+      var shown = 0;
+
+      function frame(t) {
+        if (my !== typeToken) {           // 被打断
+          busy = false;
+          return resolve(false);
+        }
+        if (startT === null) startT = t;
+
+        var n = Math.floor((t - startT) / speed);
+        if (n > text.length) n = text.length;
+
+        if (n !== shown) {
+          shown = n;
+          chatText.textContent = text.slice(0, n);
+        }
+        if (shown >= text.length) {
+          busy = false;
+          return resolve(true);
+        }
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+    });
+  }
+
+  /* ================= 主流程 ================= */
+  function main() {
+    return Promise.resolve()
+
+      // 0. 预加载（期间纯黑）
+      .then(preload)
+
+      // 1. 第一幕：背景淡入
+      .then(function () { return anim(400, function () { bgStart.classList.add('in'); }); })
+
+      // 2. START 按钮淡入
+      .then(function () { return sleep(400); })
+      .then(function () { return anim(400, function () { btnStart.classList.add('in'); }); })
+
+      // 3. 等待点击 START
+      .then(function () { return waitClick(btnStart); })
+
+      // 4. 交叉转场：第一幕淡出，第二幕（房间）淡入
+      .then(function () {
+        return anim(400, function () {
+          act1.classList.add('out');
+          act2.classList.add('in');
+        });
+      })
+
+      // 5. 对话弹窗自下而上滑入并贴底
+      .then(function () { return anim(600, function () { chat.classList.add('in'); }); })
+
+      // 6. 打第 1 句
+      .then(function () { return typeText(LINE1); })
+
+      // 7. 打完才出现 GO 按钮
+      .then(function () { return anim(300, function () { btnGo.classList.add('in'); }); })
+
+      // 8. 等待第 1 次点击 GO
+      .then(function () { return waitClick(btnGo); })
+
+      // 9. 隐藏按钮 + 清空第一句
+      .then(function () {
+        btnGo.classList.remove('in');
+        chatText.textContent = '';
+        return sleep(300);
+      })
+
+      // 10. 行李箱出现（距右 50 / 距底 30，淡入 + 上浮）
+      .then(function () { return anim(450, function () { suitcase.classList.add('in'); }); })
+
+      // 11. 打第 2 句
+      .then(function () { return typeText(LINE2); })
+
+      // 12. 打完才再次出现 GO 按钮
+      .then(function () { return anim(300, function () { btnGo.classList.add('in'); }); })
+
+      // 13. 等待第 2 次点击 GO
+      .then(function () { return waitClick(btnGo); })
+
+      // 14. 隐藏按钮
+      .then(function () {
+        btnGo.classList.remove('in');
+        return sleep(300);
+      })
+
+      // 15. 引导手出现，行李箱变为可点击
+      .then(function () { return anim(300, function () { hand.classList.add('in'); }); })
+      .then(function () {
+        suitcase.classList.add('clickable');
+        return waitClick(suitcase);
+      })
+
+      // 16. 点击行李箱：隐藏引导手
+      .then(function () {
+        suitcase.classList.remove('clickable');
+        return anim(300, function () { hand.classList.remove('in'); });
+      })
+
+      // 17. 渐变全黑，之后静止（#act3-slot 保持为空）
+      .then(function () { return anim(700, function () { blackout.classList.add('in'); }); })
+
+      .catch(function (err) { console.error('[new-journey]', err); });
+  }
+
+  /* ================= 启动 ================= */
+  fitStage();
+  main();
+
+})();
+</script>
+</body>
+</html>

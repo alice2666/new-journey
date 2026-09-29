@@ -1,0 +1,16 @@
+# ---------- 验收产物（可由 .workbuddy/tools/verify.js 重新生成）----------
+.workbuddy/tools/shots/
+.workbuddy/tools/*.log
+
+# ---------- 系统 / 编辑器 ----------
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+
+# ---------- 依赖 / 缓存（本项目当前零依赖，预留）----------
+node_modules/
+__pycache__/
+*.pyc
