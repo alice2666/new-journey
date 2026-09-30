@@ -496,17 +496,44 @@
     return;   // 到此为止，不继续执行后面的动画逻辑
   }
 
-  /* ================= 启动看门狗 =================
-     preload 完成之前本来就是纯黑，属于正常；
-     但若 6 秒后第一幕仍未显示，说明中途卡住了，得让人知道。 */
+  /* ================= 启动看门狗 + 素材体检 =================
+     ① 看门狗：preload 完成前本来就是纯黑，属正常；若 6s 后第一幕仍未显示，说明中途卡住了。
+     ② 素材体检：还有一种更隐蔽的失败 —— 脚本跑得好好的、.in 类名也加了，
+        但图片根本没解码出来（资源 404 / 路径不对），画面照样是全黑。
+        所以既要查「有没有跑起来」，也要查「图有没有真的出来」。 */
   var booted = false;
   window.__njMarkBooted = function () { booted = true; };
+
+  // 首屏 7 个素材对应的元素。第三、四幕是懒加载，此处刻意不查，避免误报。
+  function brokenAssets() {
+    var ids = ['bg-start', 'btn-start', 'bg-room', 'suitcase', 'hand', 'chat-frame', 'btn-go'];
+    var bad = [];
+    for (var i = 0; i < ids.length; i++) {
+      var el = document.getElementById(ids[i]);
+      // 只报「已加载完、但确实没有像素」的；仍在加载中的不算
+      if (el && el.tagName === 'IMG' && el.complete && !el.naturalWidth) {
+        bad.push(el.getAttribute('src') || ids[i]);
+      }
+    }
+    return bad;
+  }
+
   setTimeout(function () {
-    if (booted) return;
-    reportFailure(
-      '启动超时',
-      '脚本已执行，但 6 秒内仍未渲染出第一幕。\n最可能的原因：素材没加载上（assets 目录缺失，或打开方式不支持相对路径）。\n当前地址：' + location.href
-    );
+    var bad = brokenAssets();
+    if (bad.length) {
+      reportFailure(
+        '素材未能加载',
+        '第一幕的图片没能显示（共 ' + bad.length + ' 个）：\n  ' + bad.join('\n  ') +
+        '\n\n本页需要 index.html 与 assets/ 目录保持在同一个文件夹内。\n当前地址：' + location.href
+      );
+      return;
+    }
+    if (!booted) {
+      reportFailure(
+        '启动超时',
+        '脚本已执行，但 6 秒内仍未渲染出第一幕。\n当前地址：' + location.href
+      );
+    }
   }, 6000);
 
   /* ================= 常量 ================= */

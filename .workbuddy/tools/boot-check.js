@@ -71,9 +71,23 @@ const chk = (name, cond, extra) => {
   const tf = await ev("getComputedStyle(document.getElementById('stage')).transform");
   chk('缩放比 ≈ 0.75', /matrix\(0\.75/.test(tf), tf);
 
-  /* ---- 场景 C：模拟旧浏览器（移除 Promise）---- */
+  /* ---- 场景 D：素材 404 —— 脚本正常跑、类名也加了，但图出不来 ---- */
+  console.log('\n【场景 D】模拟素材 404：屏蔽 assets/screen1/*（脚本正常但画面全黑）');
+  await cdp.send('Network.enable');
+  await cdp.send('Network.setBlockedURLs', { urls: ['*assets/screen1/*'] });
+  await cdp.send('Page.navigate', { url: PAGE });
+  await sleep(7500);   // 等 6s 看门狗
+  const dDetail = String(await ev("document.getElementById('fb-detail').textContent"));
+  chk('兜底提示已显示', (await ev("document.getElementById('fallback').hidden")) === false);
+  chk('标题为「素材未能加载」', (await ev("document.getElementById('fb-title').textContent")) === '素材未能加载');
+  chk('列出了失败素材路径', /bg-start\.png/.test(dDetail), dDetail.slice(0, 80));
+  chk('提示了目录同级要求', /assets\//.test(dDetail));
+  chk('此时流程其实「已启动」（证明单查 booted 不够）', (await ev('window.__nj.state().booted')) === true);
+  await cdp.send('Network.setBlockedURLs', { urls: [] });
+
+  /* ---- 场景 C：模拟旧浏览器（移除 Promise）。
+         注意：addScriptToEvaluateOnNewDocument 不可撤销，故必须排在最后。 ---- */
   console.log('\n【场景 C】模拟旧引擎：删除 Promise 后加载');
-  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
     source: "try { Object.defineProperty(window, 'Promise', { get: function () { return undefined; }, configurable: true }); } catch (e) {}"
   });
