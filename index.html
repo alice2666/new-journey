@@ -305,9 +305,71 @@
   #continue.in.ready:hover  { transform: translateY(0) scale(1.05); }
   #continue.in.ready:active { transform: translateY(0) scale(.95); }
   #continue.in.settled { transition: transform .15s ease-out, opacity .2s ease-out; }
+
+  /* ---------- 启动失败兜底提示 ----------
+     本页所有元素默认 opacity:0，靠 JS 加 .in 才显示。
+     脚本一旦没跑起来，页面就是「全黑 + 点不动 + 毫无提示」，
+     所以这里必须给一块能被看见的说明，别让问题停留在猜测阶段。
+     注意：此处刻意不用 inset / flex 等较新特性，因为它要覆盖的正是旧浏览器。 */
+  #fallback {
+    position: fixed; left: 0; top: 0; right: 0; bottom: 0;
+    z-index: 9999;
+    background: #10161f; color: #e9eef7;
+    padding: 40px 48px;
+    font-family: "Microsoft YaHei", "PingFang SC", system-ui, "Segoe UI", sans-serif;
+    font-size: 15px; line-height: 1.8;
+    overflow: auto;
+    text-align: left;
+  }
+  #fallback[hidden] { display: none; }
+  #fallback h1 { margin: 0 0 6px; font-size: 22px; font-weight: 700; color: #ffd166; }
+  #fallback .fb-sub { margin: 0 0 22px; color: #9fb0c8; font-size: 13px; }
+  #fallback .fb-row { margin: 0 0 10px; }
+  #fallback .fb-k { display: inline-block; min-width: 92px; color: #7f8ea6; }
+  #fallback code {
+    background: #1c2634; border: 1px solid #2b3646; border-radius: 4px;
+    padding: 1px 6px; font-family: Consolas, Menlo, monospace; font-size: 13px; color: #8fd3ff;
+  }
+  #fallback pre {
+    margin: 18px 0 0; padding: 14px 16px;
+    background: #0a0e14; border: 1px solid #26313f; border-radius: 6px;
+    color: #ff9d8a; font-family: Consolas, Menlo, monospace; font-size: 12.5px; line-height: 1.6;
+    white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow: auto;
+  }
+  #fallback .fb-tip {
+    margin: 22px 0 0; padding: 14px 16px;
+    background: #16202c; border-left: 3px solid #ffd166; border-radius: 4px; color: #cfe0f5;
+  }
 </style>
 </head>
 <body>
+
+<!-- ===== 启动失败时的可见说明 =====
+     本页所有元素默认 opacity:0，靠脚本加 .in 才显示；
+     脚本一旦没跑起来，用户只会看到一片黑且点不动、且毫无提示。
+     所以下面两块的存在意义就是：把「黑屏」换成「能读的病因」。 -->
+
+<!-- ① JavaScript 被禁用 / 浏览器不解析脚本 -->
+<noscript>
+  <div style="position:fixed;left:0;top:0;right:0;bottom:0;z-index:9999;background:#10161f;color:#e9eef7;padding:40px 48px;font-family:'Microsoft YaHei','PingFang SC',sans-serif;font-size:15px;line-height:1.8;overflow:auto">
+    <h1 style="margin:0 0 6px;font-size:22px;color:#ffd166">此页面需要 JavaScript</h1>
+    <p style="margin:0 0 22px;color:#9fb0c8;font-size:13px">New Journey 是一段由脚本驱动的动画，没有 JavaScript 无法播放。</p>
+    <p style="margin:0">请在浏览器设置中启用 JavaScript，或改用最新版的 <b>Chrome</b> / <b>Edge</b> 重新打开本页面。</p>
+  </div>
+</noscript>
+
+<!-- ② 脚本抛错 / 引擎过旧 / 启动超时（由脚本自己填内容并显示） -->
+<div id="fallback" hidden>
+  <h1 id="fb-title">页面没能启动</h1>
+  <p class="fb-sub">脚本在渲染出第一幕之前就停止了，所以你会看到一片黑、并且点不动。</p>
+  <div class="fb-row"><span class="fb-k">浏览器</span><span id="fb-ua">—</span></div>
+  <div class="fb-row"><span class="fb-k">打开方式</span><span id="fb-proto">—</span></div>
+  <div class="fb-row"><span class="fb-k">窗口尺寸</span><span id="fb-size">—</span></div>
+  <div class="fb-row"><span class="fb-k">缩放比</span><span id="fb-scale">—</span></div>
+  <div class="fb-row"><span class="fb-k">缺失能力</span><span id="fb-missing">—</span></div>
+  <pre id="fb-detail"></pre>
+  <p class="fb-tip">把这块内容截图发给开发者即可定位。也可以按 <b>F12</b> 打开开发者工具，在 <b>Console</b> 里看有没有红色报错 —— 那是第一手线索。</p>
+</div>
 
 <div id="viewport">
   <div id="stage">
@@ -392,6 +454,60 @@
 <script>
 (function () {
   'use strict';
+
+  /* ================= 启动兜底（防「静默黑屏」） =================
+     本页所有元素默认 opacity:0，只有脚本加上 .in 才会显示。
+     也就是说：脚本没跑起来 = 全黑 + 点不动 + 且没有任何提示 —— 这是最难自行排查的状态。
+     所以第一件事是自检，把病因直接写到屏幕上，而不是让用户对着黑屏猜。 */
+  var fallbackBox = document.getElementById('fallback');
+
+  function reportFailure(title, detail, missing) {
+    try { console.error('[new-journey] ' + title + (detail ? ' :: ' + detail : '')); } catch (e) { /* 忽略 */ }
+    if (!fallbackBox) return;
+    function put(id, val) {
+      var el = document.getElementById(id);
+      if (el && val !== undefined && val !== null) el.textContent = String(val);
+    }
+    put('fb-title', title);
+    put('fb-detail', detail || '');
+    put('fb-missing', missing || '—');
+    try {
+      put('fb-ua', navigator.userAgent);
+      put('fb-proto', location.protocol === 'file:' ? 'file:// （双击打开本地文件）' : location.protocol);
+      put('fb-size', window.innerWidth + ' × ' + window.innerHeight);
+      put('fb-scale', window.devicePixelRatio);
+    } catch (e) { /* 忽略 */ }
+    fallbackBox.hidden = false;
+  }
+
+  // 引擎能力自检：这 4 项任一缺失，后面的动画必然跑不起来（比如 IE11 就缺 Promise / closest）
+  var lack = [];
+  if (typeof Promise !== 'function') lack.push('Promise');
+  if (!document.documentElement.classList) lack.push('classList');
+  if (typeof window.requestAnimationFrame !== 'function') lack.push('requestAnimationFrame');
+  if (typeof Element === 'undefined' || !Element.prototype.closest) lack.push('Element.closest');
+
+  if (lack.length) {
+    reportFailure(
+      '浏览器版本过旧',
+      '当前浏览器缺少：' + lack.join('、') + '。\n本页需要 Chrome 41+ / Edge 15+ / Firefox 44+，请改用最新版的 Chrome 或 Edge 打开。',
+      lack.join('、')
+    );
+    return;   // 到此为止，不继续执行后面的动画逻辑
+  }
+
+  /* ================= 启动看门狗 =================
+     preload 完成之前本来就是纯黑，属于正常；
+     但若 6 秒后第一幕仍未显示，说明中途卡住了，得让人知道。 */
+  var booted = false;
+  window.__njMarkBooted = function () { booted = true; };
+  setTimeout(function () {
+    if (booted) return;
+    reportFailure(
+      '启动超时',
+      '脚本已执行，但 6 秒内仍未渲染出第一幕。\n最可能的原因：素材没加载上（assets 目录缺失，或打开方式不支持相对路径）。\n当前地址：' + location.href
+    );
+  }, 6000);
 
   /* ================= 常量 ================= */
   var STAGE_W = 1200;
@@ -955,6 +1071,7 @@
 
       // 1. 第一幕：背景淡入
       .then(function () { return anim(400, function () { bgStart.classList.add('in'); }); })
+      .then(function () { window.__njMarkBooted(); })   // 第一幕已出，撤销启动看门狗
 
       // 2. START 按钮淡入
       .then(function () { return sleep(400); })
@@ -1037,7 +1154,9 @@
       // 20. 第四幕：蒙黑 → Goal → Continue → 全黑静止（Demo 结束）
       .then(runAct4)
 
-      .catch(function (err) { console.error('[new-journey]', err); });
+      .catch(function (err) {
+        reportFailure('运行出错', (err && (err.stack || err.message)) || String(err));
+      });
   }
 
   /* ================= 测试钩子（不影响正常表现） ================= */
@@ -1048,14 +1167,20 @@
     state: function () {
       return {
         count: stickerCount, okReady: okReady, placing: !!placing, act3Done: act3Done,
-        busy: busy, animLock: animLock
+        busy: busy, animLock: animLock,
+        booted: booted,                     // 第一幕是否已渲染（看门狗标记）
+        fallbackShown: !!(fallbackBox && !fallbackBox.hidden)   // 是否显示了启动失败提示
       };
     }
   };
 
   /* ================= 启动 ================= */
-  fitStage();
-  main();
+  try {
+    fitStage();
+    main();
+  } catch (err) {
+    reportFailure('初始化失败', (err && (err.stack || err.message)) || String(err));
+  }
 
 })();
 </script>
