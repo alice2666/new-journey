@@ -51,9 +51,9 @@
   }
 
   /* ---------- 淡入元素默认态 ---------- */
-  #bg-start, #btn-start, #suitcase, #hand, #btn-go, #blackout { opacity: 0; }
+  #bg-start, #btn-start, #suitcase, #hand, #btn-go, #btn-go3, #blackout { opacity: 0; }
   #bg-start.in, #btn-start.in, #suitcase.in, #hand.in,
-  #btn-go.in, #blackout.in { opacity: 1; }
+  #btn-go.in, #btn-go3.in, #blackout.in { opacity: 1; }
 
   /* ---------- 第一幕 START：水平居中，底边距画布底 170px ---------- */
   #btn-start {
@@ -68,8 +68,11 @@
   #btn-start.in:hover { transform: scale(1.05); }
   #btn-start.in:active { transform: scale(.95); }
 
-  /* ---------- 对话弹窗：自下而上滑入并贴底 ---------- */
-  #chat {
+  /* ---------- 对话弹窗：自下而上滑入并贴底 ----------
+     抽成 .chat 公共类：第二幕 #chat 与第三幕 #chat3 共用同一套几何与动画
+     （screen3/chat.png 与 screen2/chat.png md5 相同，无需重新定位）。
+     id 保留不变，供既有断言与 JS 引用。 */
+  .chat {
     position: absolute; left: 0; top: 400px;
     width: 1200px; height: 496px;
     z-index: 30;
@@ -77,11 +80,11 @@
     transition: transform .6s ease-out, opacity .35s ease-out;
     pointer-events: none;              /* 纯装饰，不拦截点击 */
   }
-  #chat.in { transform: translateY(0); }
-  /* 第 2 次点击 GO 后：整个 chat.png（画面 + Luna 姓名牌 + 台词）整体淡出消失 */
-  #chat.out { opacity: 0; }
+  .chat.in { transform: translateY(0); }
+  /* 点击 GO 后：整个 chat.png（画面 + Luna 姓名牌 + 台词）整体淡出消失 */
+  .chat.out { opacity: 0; }
 
-  #chat-frame {
+  .chat-frame {
     position: absolute; left: 0; top: 0;
     width: 1200px; height: 496px;
     pointer-events: none;
@@ -104,7 +107,7 @@
      ── 实测参照（均为画布坐标）────────────────────────────────────
      浅蓝底板上沿 y=718；姓名牌 x351-523 / y690-755；角色立绘最右 x=350；
      GO 按钮 x1062-1100 / y799-846。 */
-  #chat-text {
+  #chat-text, .chat-text {
     position: absolute;
     left: 380px;
     width: 640px;
@@ -147,8 +150,8 @@
     50%      { transform: scale(.85); }
   }
 
-  /* ---------- 推进按钮：距右 100px，距底 50px ---------- */
-  #btn-go {
+  /* ---------- 推进按钮：距右 100px，距底 50px（第二幕 #btn-go / 第三幕 #btn-go3 共用） ---------- */
+  #btn-go, #btn-go3 {
     position: absolute;
     right: 100px; bottom: 50px;        /* 38x47 -> left 1062, top 799 */
     width: 38px; height: 47px;
@@ -157,9 +160,9 @@
     transition: opacity .3s ease-out, transform .15s ease-out;
     pointer-events: none;
   }
-  #btn-go.in { pointer-events: auto; cursor: pointer; }
-  #btn-go.in:hover { transform: scale(1.15); }
-  #btn-go.in:active { transform: scale(.92); }
+  #btn-go.in, #btn-go3.in { pointer-events: auto; cursor: pointer; }
+  #btn-go.in:hover, #btn-go3.in:hover { transform: scale(1.15); }
+  #btn-go.in:active, #btn-go3.in:active { transform: scale(.92); }
 
   /* ---------- 遮黑层 ---------- */
   #blackout {
@@ -169,9 +172,139 @@
     transition: opacity .7s ease-out;
   }
   #blackout.in { pointer-events: auto; }
+  /* 幕间转场用 400ms 淡出（需求 §6.2） */
+  #blackout.fast { transition-duration: .4s; }
+  /* 透明但仍拦截点击：视频播放期间用它挡掉一切误触（需求 §8「视频播放期间完全屏蔽点击」）。
+     必须放在 .in 之后：两者同特异性，靠声明顺序取胜。 */
+  #blackout.guard { opacity: 0; pointer-events: auto; }
 
-  /* ---------- 第三幕预留容器（本阶段保持为空） ---------- */
-  #act3-slot { position: absolute; inset: 0; z-index: 110; pointer-events: none; }
+  /* ---------- 后续幕预留容器（保持为空） ---------- */
+  #act3-slot, #act5-slot { position: absolute; inset: 0; z-index: 110; pointer-events: none; }
+
+  /* ==================================================================
+     第三幕：贴纸定制（z-index 3，位于 #act2(2) 之上、#blackout(100) 之下）
+     ================================================================== */
+  #act3 { z-index: 3; pointer-events: none; }
+  #act3.active { pointer-events: auto; }
+  /* 待放置贴纸时的光标反馈：箱身内 pointer，范围外 not-allowed */
+  #act3.placing { cursor: not-allowed; }
+  #act3.placing.on-body { cursor: pointer; }
+
+  #bg-room-suitcase, #act3-video {
+    position: absolute; left: 0; top: 0; width: 1200px; height: 896px;
+  }
+  /* 定格图常驻视频下层：视频结束时视频淡出即可露出它，末帧有细微差异也不会闪黑 */
+  #bg-room-suitcase { z-index: 1; }
+  #act3-video {
+    z-index: 2;
+    object-fit: fill;                  /* 1112x834 -> 1200x896，纵横比仅差 0.45% */
+    opacity: 0;
+    transition: opacity .25s ease-out;
+  }
+  #act3-video.in { opacity: 1; }
+
+  /* 已落定的贴纸容器（箱身贴纸 z-index 10 起，按贴上顺序递增） */
+  #sticker-layer { position: absolute; inset: 0; z-index: 10; pointer-events: none; }
+  #sticker-layer .placed {
+    position: absolute; width: 142px; height: 119px;
+    transform-origin: center center;
+    animation: drop .18s ease-out;
+  }
+  @keyframes drop {
+    from { transform: rotate(var(--rot, 0deg)) scale(1.12); }
+    to   { transform: rotate(var(--rot, 0deg)) scale(1); }
+  }
+
+  /* 贴纸面板：距顶 45 / 距右 25 -> left 653 / top 45 */
+  #sticker-panel { position: absolute; inset: 0; z-index: 30; pointer-events: none; }
+  #sticker-frame {
+    position: absolute; left: 653px; top: 45px; width: 522px; height: 630px;
+    transform: translateX(560px);      /* 初始完全在画布右侧之外：653+560 = 1213 > 1200 */
+    transition: transform .6s ease-out;
+  }
+  #sticker-frame.in { transform: translateX(0); }
+
+  /* 调色板 11 张贴纸：142x119，与面板槽位等尺寸，直接对位（坐标写在 HTML 内联样式） */
+  .palette {
+    position: absolute; width: 142px; height: 119px;
+    opacity: 0;
+    transition: opacity .4s ease-out, filter .2s ease-out;
+    pointer-events: none;
+  }
+  .palette.in { opacity: 1; pointer-events: auto; cursor: pointer; }
+  .palette.in:hover { filter: brightness(1.08) drop-shadow(0 0 10px rgba(255,255,255,.55)); }
+  /* 已使用 / 待放置：置灰且不可再点（同一张贴纸不允许重复使用 —— Q15） */
+  .palette.used { opacity: .35; filter: grayscale(1); pointer-events: none; cursor: default; }
+
+  /* 手持 / 飞行层：待放置贴纸跟随光标 + 飞回取消的过渡元素 */
+  #sticker-cursor { position: absolute; inset: 0; z-index: 45; pointer-events: none; }
+  #sticker-cursor img {
+    position: absolute; left: 0; top: 0;
+    width: 142px; height: 119px;
+    opacity: .85;
+    filter: drop-shadow(0 6px 12px rgba(0,0,0,.35));
+    will-change: transform;
+    pointer-events: none;
+  }
+
+  /* RESET / OK：距底 85 -> top 714；OK 距右 25 -> left 949，RESET 在 OK 左 70px -> left 652 */
+  #btn-reset, #btn-ok {
+    position: absolute; top: 714px; z-index: 40;
+    transform: translateY(150px);      /* 初始完全在画布下沿之外：714+150 = 864，下边缘 961 > 896 */
+    opacity: 0; pointer-events: none;
+    transition: transform .5s ease-out, opacity .3s ease-out, filter .2s ease-out;
+  }
+  #btn-reset { left: 652px; width: 227px; height: 97px; }
+  #btn-ok    { left: 949px; width: 226px; height: 97px; }
+  #btn-reset.in, #btn-ok.in { transform: translateY(0); }
+  #btn-reset.in { opacity: 1; pointer-events: auto; cursor: pointer; }
+  #btn-reset.in:hover  { transform: translateY(0) scale(1.05); }
+  #btn-reset.in:active { transform: translateY(0) scale(.95); }
+  /* OK 出现后默认置灰禁用（贴纸数 < 3），≥ 3 才由 JS 切到 .ready */
+  #btn-ok.in.dim   { opacity: .45; filter: grayscale(1); pointer-events: none; cursor: not-allowed; }
+  #btn-ok.in.ready { opacity: 1; filter: none; pointer-events: auto; cursor: pointer; }
+  #btn-ok.in.ready:hover  { transform: translateY(0) scale(1.05); }
+  #btn-ok.in.ready:active { transform: translateY(0) scale(.95); }
+  /* 入场动画跑完后切成快速过渡，hover 才不迟钝 */
+  #btn-reset.in.settled, #btn-ok.in.settled { transition: transform .15s ease-out, opacity .2s ease-out, filter .2s ease-out; }
+
+  /* 点击 OK 后第三幕 UI 整体淡出（shadow.png 是 70% 半透明，不淡出会透过蒙黑层若隐若现）。
+     需求只要求「面板 + 调色板 + RESET/OK 按钮」淡出 —— 箱身上已落定的贴纸属于玩家的作品，
+     刻意保留，让达成页里的行李箱仍是「装饰好的那一只」。 */
+  #act3.ui-out #sticker-panel { opacity: 0; transition: opacity .3s ease-out; }
+  #act3.ui-out #btn-reset,
+  #act3.ui-out #btn-ok { opacity: 0; pointer-events: none; }
+
+  /* ==================================================================
+     第四幕：目标达成（z-index 4）
+     ================================================================== */
+  #act4 { z-index: 4; pointer-events: none; }
+  #shadow {
+    position: absolute; inset: 0; z-index: 90;
+    opacity: 0; transition: opacity .6s ease-out;
+  }
+  #shadow.in { opacity: 1; }
+  /* goal01：水平居中 / 距顶 120 -> left 221 / top 120 */
+  #goal01 {
+    position: absolute; left: 221px; top: 120px; width: 758px; height: 579px; z-index: 95;
+    opacity: 0; transform: scale(.92);
+    transition: opacity .45s ease-out, transform .45s ease-out;
+  }
+  #goal01.in { opacity: 1; transform: scale(1); }
+  /* Continue：水平居中 / 距底 95 -> left 467.5 / top 770 */
+  #continue {
+    position: absolute; left: 467.5px; top: 770px; width: 265px; height: 31px; z-index: 96;
+    opacity: 0;
+    transform: translateY(120px);      /* 初始完全在画布下沿之外：770+120 = 890，下边缘 921 > 896 */
+    transition: transform .5s ease-out, opacity .3s ease-out;
+    pointer-events: none;
+  }
+  #continue.in { opacity: 1; transform: translateY(0); }
+  /* 第四幕唯一可点击元素（Q20：点击后才转全黑，不自动延时） */
+  #continue.in.ready { pointer-events: auto; cursor: pointer; }
+  #continue.in.ready:hover  { transform: translateY(0) scale(1.05); }
+  #continue.in.ready:active { transform: translateY(0) scale(.95); }
+  #continue.in.settled { transition: transform .15s ease-out, opacity .2s ease-out; }
 </style>
 </head>
 <body>
@@ -193,19 +326,65 @@
 
       <img id="hand" src="assets/screen2/hand.png" alt="">
 
-      <div id="chat">
-        <img id="chat-frame" src="assets/screen2/chat.png" alt="">
-        <p id="chat-text"></p>
+      <div id="chat" class="chat">
+        <img id="chat-frame" class="chat-frame" src="assets/screen2/chat.png" alt="">
+        <p id="chat-text" class="chat-text"></p>
       </div>
 
       <img id="btn-go" src="assets/screen2/btn-go.png" alt="GO">
     </section>
 
+    <!-- ========== 第三幕：贴纸定制 ========== -->
+    <section id="act3" class="scene">
+      <!-- 定格图在下、视频在上：视频结束时视频淡出即可露出定格图，末帧差异不会闪黑 -->
+      <img id="bg-room-suitcase" src="assets/screen3/bg-room-suitcase.png" alt="">
+      <!-- src 由 JS 在第二幕末尾注入：4.54MB 的视频不参与首屏预加载 -->
+      <video id="act3-video" playsinline muted preload="none"></video>
+
+      <!-- 已落定贴纸（自由落点，z-index 10 起递增） -->
+      <div id="sticker-layer"></div>
+
+      <div id="chat3" class="chat">
+        <img class="chat-frame" src="assets/screen3/chat.png" alt="">
+        <p class="chat-text"></p>
+      </div>
+      <img id="btn-go3" src="assets/screen2/btn-go.png" alt="GO">
+
+      <!-- 贴纸面板 + 11 张调色板贴纸（槽位画布坐标：列 690/847/1004 × 行 91/225/361/495，第 4 行第 3 格留空） -->
+      <div id="sticker-panel">
+        <img id="sticker-frame" src="assets/screen3/sticker-frame.png" alt="">
+        <img class="palette" data-sticker="bag"      style="left:690px;top:91px"  src="assets/screen3/bag.png"      alt="">
+        <img class="palette" data-sticker="camera"   style="left:847px;top:91px"  src="assets/screen3/camera.png"   alt="">
+        <img class="palette" data-sticker="drink"    style="left:1004px;top:91px" src="assets/screen3/drink.png"    alt="">
+        <img class="palette" data-sticker="flower"   style="left:690px;top:225px" src="assets/screen3/flower.png"   alt="">
+        <img class="palette" data-sticker="love"     style="left:847px;top:225px" src="assets/screen3/love.png"     alt="">
+        <img class="palette" data-sticker="mountant" style="left:1004px;top:225px" src="assets/screen3/mountant.png" alt="">
+        <img class="palette" data-sticker="passport" style="left:690px;top:361px" src="assets/screen3/passport.png" alt="">
+        <img class="palette" data-sticker="planet"   style="left:847px;top:361px" src="assets/screen3/planet.png"   alt="">
+        <img class="palette" data-sticker="rainboat" style="left:1004px;top:361px" src="assets/screen3/rainboat.png" alt="">
+        <img class="palette" data-sticker="travel"   style="left:690px;top:495px" src="assets/screen3/travel.png"   alt="">
+        <img class="palette" data-sticker="tree"     style="left:847px;top:495px" src="assets/screen3/tree.png"     alt="">
+      </div>
+      <img id="btn-reset" src="assets/screen3/btn-reset.png" alt="RESET">
+      <img id="btn-ok" src="assets/screen3/btn-ok.png" alt="OK">
+    </section>
+
+    <!-- 手持 / 飞行层（贴纸跟随光标 + 飞回取消的过渡元素） -->
+    <div id="sticker-cursor"></div>
+
+    <!-- ========== 第四幕：目标达成 ========== -->
+    <section id="act4" class="scene">
+      <img id="shadow" src="assets/screen4/shadow.png" alt="">
+      <img id="goal01" src="assets/screen4/goal01.png" alt="">
+      <img id="continue" src="assets/screen4/Continue.png" alt="Continue">
+    </section>
+
     <!-- ========== 遮黑层 ========== -->
     <div id="blackout"></div>
 
-    <!-- ========== 第三幕预留位（空） ========== -->
+    <!-- ========== 后续幕预留位（保持为空） ========== -->
     <div id="act3-slot"></div>
+    <div id="act5-slot"></div>
 
   </div>
 </div>
@@ -219,13 +398,27 @@
   var STAGE_H = 896;
 
   var AUDIO_SRC = 'audio/toggle.wav';
+  var VIDEO_SRC = 'assets/screen3/suitcase-move.mp4';
 
   var LINE1 = 'Wow! I’m traveling somewhere new. Let me get ready.';
   var LINE2 = 'This brand-new suitcase has no marks. Someone might take it by mistake.';
+  var LINE3 = 'Let’s add our favourite stickers. Now it will be our exclusive suitcase!';
 
-  var TYPE_SPEED = 40;   // ms / 字
+  var TYPE_SPEED = 40;        // ms / 字
   var CLICK_COOLDOWN = 300;
 
+  /* ---- 第三幕贴纸玩法（自由落点 Q14 / Q24） ---- */
+  var STICKER_W = 142;        // 贴纸素材原尺寸，与面板槽位完全等尺寸，不缩放
+  var STICKER_H = 119;
+  var BODY = { left: 150, right: 536, top: 246, bottom: 779 };  // 箱身实测范围；判据是「点击点 = 贴纸中心」
+  var OK_THRESHOLD = 3;       // 箱身贴纸数 ≥ 3 时 btn-ok 可用（Q16）
+  var RISE_MS = 200;          // 选中升起
+  var FLY_MS = 250;           // 落定过渡 / 飞回取消
+  var STICKER_FADE_MS = 400;
+  var STICKER_STAGGER_MS = 40;  // 11 张贴纸错峰浮现间隔（Q23）
+
+  /* 首屏只加载第一、二幕（3.8MB）；
+     三、四幕（合计 6.4MB，视频独占 4.54MB）留到第二幕末尾并行预加载 */
   var IMAGES = [
     'assets/screen1/bg-start.png',
     'assets/screen1/btn-start.png',
@@ -236,23 +429,74 @@
     'assets/screen2/hand.png'
   ];
 
+  var ACT34_IMAGES = [
+    'assets/screen3/bg-room-suitcase.png',
+    'assets/screen3/chat.png',
+    'assets/screen3/sticker-frame.png',
+    'assets/screen3/btn-reset.png',
+    'assets/screen3/btn-ok.png',
+    'assets/screen4/shadow.png',
+    'assets/screen4/goal01.png',
+    'assets/screen4/Continue.png'
+  ];
+
   /* ================= DOM ================= */
-  var stage     = document.getElementById('stage');
-  var act1      = document.getElementById('act1');
-  var act2      = document.getElementById('act2');
-  var bgStart   = document.getElementById('bg-start');
-  var btnStart  = document.getElementById('btn-start');
-  var chat      = document.getElementById('chat');
-  var chatText  = document.getElementById('chat-text');
-  var suitcase  = document.getElementById('suitcase');
-  var hand      = document.getElementById('hand');
-  var btnGo     = document.getElementById('btn-go');
-  var blackout  = document.getElementById('blackout');
+  var stage      = document.getElementById('stage');
+
+  var act1       = document.getElementById('act1');
+  var act2       = document.getElementById('act2');
+  var bgStart    = document.getElementById('bg-start');
+  var btnStart   = document.getElementById('btn-start');
+  var chat       = document.getElementById('chat');
+  var chatText   = document.getElementById('chat-text');
+  var suitcase   = document.getElementById('suitcase');
+  var hand       = document.getElementById('hand');
+  var btnGo      = document.getElementById('btn-go');
+
+  var act3       = document.getElementById('act3');
+  var video      = document.getElementById('act3-video');
+  var chat3      = document.getElementById('chat3');
+  var chat3Text  = chat3.querySelector('.chat-text');
+  var btnGo3     = document.getElementById('btn-go3');
+  var stickerLayer  = document.getElementById('sticker-layer');
+  var stickerCursor = document.getElementById('sticker-cursor');
+  var stickerFrame  = document.getElementById('sticker-frame');
+  var btnReset   = document.getElementById('btn-reset');
+  var btnOk      = document.getElementById('btn-ok');
+
+  var act4        = document.getElementById('act4');
+  var shadow      = document.getElementById('shadow');
+  var goal01      = document.getElementById('goal01');
+  var btnContinue = document.getElementById('continue');
+
+  var blackout   = document.getElementById('blackout');
+
+  /* 调色板 11 张贴纸：槽位坐标的唯一来源是 HTML 的内联样式，避免两处各写一份 */
+  var palettes = [].map.call(document.querySelectorAll('#sticker-panel .palette'), function (el) {
+    return {
+      el: el,
+      key: el.getAttribute('data-sticker'),
+      src: el.getAttribute('src'),
+      left: parseFloat(el.style.left),
+      top: parseFloat(el.style.top),
+      used: false
+    };
+  });
 
   /* ================= 运行时状态 ================= */
-  var busy = false;          // 动画 / 打字期间锁点击
+  var busy = false;          // 演出锁：动画 / 打字期间为 true，屏蔽一切点击
   var lastClickAt = 0;       // 点击冷却
   var typeToken = 0;         // 打字任务令牌，防止串台
+  var animLock = false;      // 贴纸过渡锁：落定 / 飞回期间为 true（只锁贴纸交互，不影响 RESET / OK）
+  var placing = null;        // 待放置贴纸 { item, el, x, y }
+  var placed = [];           // 已落定贴纸的 DOM
+  var stickerCount = 0;
+  var okReady = false;
+  var act3Done = false;      // 第四幕是否已开始，防重复触发
+  var lastPointer = null;    // 最近一次光标的画布坐标
+  var rafPending = false;
+  var preload34 = null;
+  var rotOverride = null;    // 测试钩子：固定落定旋转角
 
   /* ================= 工具 ================= */
   function sleep(ms) {
@@ -264,6 +508,12 @@
     busy = true;
     if (fn) fn();
     return sleep(ms).then(function () { busy = false; });
+  }
+
+  function once(el, ev) {
+    return new Promise(function (r) {
+      el.addEventListener(ev, function h() { el.removeEventListener(ev, h); r(); });
+    });
   }
 
   // 等待有效点击（含音效、防连点）
@@ -289,6 +539,19 @@
     stage.style.transform = 'scale(' + s + ')';
   }
   window.addEventListener('resize', fitStage);
+
+  /* ================= 坐标换算（自由落点的命门） =================
+     #stage 带 transform: scale(s)，鼠标的 clientX/Y 是视口坐标，不能直接当画布坐标用。
+     跟随定位与落点判定必须走同一套换算后的坐标，否则会出现「看着能贴、实际贴不上」。 */
+  function toStage(e) {
+    var r = stage.getBoundingClientRect();
+    var s = r.width / STAGE_W;            // 缩放比直接从 rect 反推，不依赖外部状态
+    return { x: (e.clientX - r.left) / s, y: (e.clientY - r.top) / s };
+  }
+
+  function inBody(x, y) {
+    return x >= BODY.left && x <= BODY.right && y >= BODY.top && y <= BODY.bottom;
+  }
 
   /* ================= 音效（3 实例轮询，允许重叠） ================= */
   var pool = [];
@@ -338,12 +601,35 @@
     return Promise.all([Promise.all(IMAGES.map(loadImage)), loadAudio()]);
   }
 
+  // 视频的 src 到此刻才注入：首屏不会去拉这 4.54MB
+  function loadVideo() {
+    return new Promise(function (res) {
+      var done = false;
+      function fin() { if (done) return; done = true; res(); }
+      if (!video.getAttribute('src')) video.src = VIDEO_SRC;
+      video.preload = 'auto';
+      video.addEventListener('canplaythrough', fin, { once: true });
+      video.addEventListener('loadeddata', fin, { once: true });
+      video.addEventListener('error', fin, { once: true });
+      try { video.load(); } catch (e) { fin(); }
+      setTimeout(fin, 4000);   // 兜底，绝不卡住流程
+    });
+  }
+
+  function preloadAct34() {
+    if (!preload34) {
+      preload34 = Promise.all([Promise.all(ACT34_IMAGES.map(loadImage)), loadVideo()]);
+    }
+    return preload34;
+  }
+
   /* ================= 打字机 ================= */
-  function typeText(text, speed) {
+  function typeText(text, speed, target) {
     speed = speed || TYPE_SPEED;
+    target = target || chatText;
     busy = true;
     var my = ++typeToken;
-    chatText.textContent = '';
+    target.textContent = '';
 
     return new Promise(function (resolve) {
       var startT = null;
@@ -361,7 +647,7 @@
 
         if (n !== shown) {
           shown = n;
-          chatText.textContent = text.slice(0, n);
+          target.textContent = text.slice(0, n);
         }
         if (shown >= text.length) {
           busy = false;
@@ -373,11 +659,298 @@
     });
   }
 
+  /* ================= 第三幕：贴纸玩法（核心） ================= */
+
+  // 把「中心点」换算成跟随层的 transform（贴纸以中心对齐光标）
+  function xf(cx, cy, scale) {
+    return 'translate3d(' + (cx - STICKER_W / 2) + 'px,' + (cy - STICKER_H / 2) + 'px,0)' +
+           (scale === undefined ? '' : ' scale(' + scale + ')');
+  }
+
+  // ① 选中升起 → 转为跟随光标
+  function startPlacing(item, at) {
+    item.used = true;
+    item.el.classList.add('used');            // 面板中置灰，不再可点（Q15）
+
+    var slotCx = item.left + STICKER_W / 2;
+    var slotCy = item.top + STICKER_H / 2;
+    var p = at || { x: slotCx, y: slotCy };
+
+    var img = document.createElement('img');
+    img.src = item.src;
+    img.alt = '';
+    img.style.transition = 'none';
+    img.style.transform = xf(slotCx, slotCy, 0.9);   // 起点 = 槽位（略缩 0.9，表示「拿起来了」）
+    stickerCursor.appendChild(img);
+
+    placing = { item: item, el: img, x: p.x, y: p.y };
+    act3.classList.add('placing');
+    act3.classList.toggle('on-body', inBody(p.x, p.y));
+
+    requestAnimationFrame(function () {
+      if (!placing || placing.el !== img) return;
+      img.style.transition = 'transform ' + RISE_MS + 'ms ease-out';
+      img.style.transform = xf(p.x, p.y, 0.9);
+      setTimeout(function () {
+        // 跟随时必须去掉过渡，否则每一帧都追赶，画面拖影
+        if (placing && placing.el === img) img.style.transition = 'none';
+      }, RISE_MS + 20);
+    });
+  }
+
+  // ④ 取消：贴纸飞回原槽位并取消待放置（Q24），不计数
+  function cancelPlacing(instant) {
+    if (!placing) return;
+    var p = placing;
+    placing = null;
+    act3.classList.remove('placing', 'on-body');
+
+    p.item.used = false;
+    p.item.el.classList.remove('used');       // 面板立刻恢复可点
+
+    if (instant) { p.el.remove(); return; }
+
+    p.el.style.transition = 'transform ' + FLY_MS + 'ms ease-out, opacity ' + FLY_MS + 'ms ease-out';
+    p.el.style.transform = xf(p.item.left + STICKER_W / 2, p.item.top + STICKER_H / 2, 1);
+    setTimeout(function () { p.el.remove(); }, FLY_MS + 30);
+  }
+
+  // ③ 落定：以点击点为中心贴上，随机旋转 −10°~+10°
+  function placeSticker(p) {
+    var item = placing.item;
+    placing.el.remove();
+    placing = null;
+    act3.classList.remove('placing', 'on-body');
+
+    var el = document.createElement('img');
+    el.src = item.src;
+    el.alt = '';
+    el.className = 'placed';
+    el.style.left = (p.x - STICKER_W / 2) + 'px';
+    el.style.top = (p.y - STICKER_H / 2) + 'px';
+    el.style.zIndex = String(10 + stickerCount);        // 后贴的压住先贴的
+    var rot = (rotOverride === null) ? (Math.random() * 20 - 10) : rotOverride;
+    el.style.setProperty('--rot', rot.toFixed(2) + 'deg');
+    el.style.transform = 'rotate(' + rot.toFixed(2) + 'deg)';
+    stickerLayer.appendChild(el);
+    placed.push(el);
+
+    stickerCount++;
+    playSound();                                        // 落定再响一次
+    updateOkState();
+  }
+
+  function updateOkState() {
+    okReady = stickerCount >= OK_THRESHOLD;
+    if (okReady) { btnOk.classList.remove('dim'); btnOk.classList.add('ready'); }
+    else { btnOk.classList.add('dim'); btnOk.classList.remove('ready'); }
+  }
+
+  // RESET：清空箱身全部贴纸 + 调色板 11 张全部恢复 + 计数归零 + 取消待放置
+  function resetAll() {
+    playSound();
+    cancelPlacing(true);
+    placed.forEach(function (el) { el.remove(); });
+    placed = [];
+    stickerCount = 0;
+    palettes.forEach(function (it) { it.used = false; it.el.classList.remove('used'); });
+    updateOkState();
+  }
+
+  function flushCursor() {
+    rafPending = false;
+    if (!placing) return;
+    placing.el.style.transform = xf(placing.x, placing.y, 0.9);
+    act3.classList.toggle('on-body', inBody(placing.x, placing.y));
+  }
+
+  function bindStickerPlay() {
+    // 面板贴纸：点击进入待放置态（若手上已有，先让它飞回槽位）
+    palettes.forEach(function (item) {
+      item.el.addEventListener('click', function () {
+        if (busy || animLock || act3Done || item.used) return;
+        playSound();                                   // 选中响一次
+        if (placing) cancelPlacing(true);
+        startPlacing(item, lastPointer);
+      });
+    });
+
+    // 跟随光标：pointermove 只记录坐标，真正改样式交给 rAF 节流
+    stage.addEventListener('pointermove', function (e) {
+      var p = toStage(e);
+      lastPointer = p;
+      if (!placing) return;
+      placing.x = p.x;
+      placing.y = p.y;
+      if (rafPending) return;
+      rafPending = true;
+      requestAnimationFrame(flushCursor);
+    });
+
+    // 落点判定：点击点（= 贴纸中心）落在箱身内 → 贴上；否则飞回取消（Q24）
+    stage.addEventListener('click', function (e) {
+      if (busy || animLock || act3Done || !placing) return;
+      var t = e.target;
+      if (t && t.closest && t.closest('.palette')) return;                       // 面板贴纸自己处理（切换目标）
+      if (t && t.closest && t.closest('#btn-ok, #btn-reset, #btn-go3')) return;  // 按钮各自处理
+
+      var p = toStage(e);
+      animLock = true;
+      if (inBody(p.x, p.y)) placeSticker(p);
+      else cancelPlacing(false);
+      setTimeout(function () { animLock = false; }, FLY_MS);
+    });
+
+    btnReset.addEventListener('click', function () {
+      if (busy || act3Done) return;
+      resetAll();
+    });
+  }
+
+  /* ================= 第三幕流程 ================= */
+
+  // A1：自动播放视频。返回 true = 真的播起来了；false = 不可用，走降级路径
+  function playVideo() {
+    return new Promise(function (resolve) {
+      var done = false;
+      function fin(ok) { if (done) return; done = true; resolve(ok); }
+
+      if (video.readyState >= 2) {        // 预加载已完成，直接开播
+        try { video.currentTime = 0; } catch (e) {}
+        try { video.play(); } catch (e) {}
+        video.classList.add('in');
+        return fin(true);
+      }
+
+      video.classList.add('in');
+      var p = null;
+      try { p = video.play(); } catch (e) { p = null; }
+      if (p && typeof p.catch === 'function') p.catch(function () { fin(false); });
+
+      video.addEventListener('playing', function onPlaying() {
+        video.removeEventListener('playing', onPlaying);
+        fin(true);
+      });
+      setTimeout(function () { fin(false); }, 3000);   // 3s 未就绪 → 降级，绝不让流程卡死
+    });
+  }
+
+  function runAct3Intro() {
+    return Promise.resolve()
+
+      // A1-1 黑幕停留 500ms（三、四幕素材已在并行预加载）
+      .then(function () { return sleep(500); })
+
+      // A1-2 进入第三幕并自动播放（Q11）
+      .then(function () {
+        act3.classList.add('active');
+        return playVideo();
+      })
+
+      // A1-3 黑幕 400ms 淡出露出视频；同时挂 .guard —— 透明但仍拦截点击
+      .then(function (played) {
+        blackout.classList.add('fast');
+        return anim(400, function () {
+          blackout.classList.remove('in');
+          blackout.classList.add('guard');
+        }).then(function () { return played; });
+      })
+
+      // A1-4 视频结束 → 视频 250ms 淡出露出定格图；降级则直接定格
+      .then(function (played) {
+        if (!played) {
+          video.classList.remove('in');
+          try { video.pause(); } catch (e) {}
+          return;
+        }
+        return once(video, 'ended').then(function () {
+          return anim(250, function () { video.classList.remove('in'); });
+        });
+      })
+      .then(function () { blackout.classList.remove('guard'); })
+
+      // A2 定格 + 第三句对话（几何完全复用第二幕，screen3/chat.png 与 screen2 字节相同）
+      .then(function () { return anim(600, function () { chat3.classList.add('in'); }); })
+      .then(function () { return typeText(LINE3, TYPE_SPEED, chat3Text); })
+
+      // A3 打完才出 GO；点击后整个对话框（含姓名牌）整体消失
+      .then(function () { return anim(300, function () { btnGo3.classList.add('in'); }); })
+      .then(function () { return waitClick(btnGo3); })
+      .then(function () {
+        btnGo3.classList.remove('in');
+        chat3Text.textContent = '';
+        return sleep(300);
+      })
+      .then(function () { return anim(400, function () { chat3.classList.add('out'); }); });
+  }
+
+  // A4 入场：面板 → 贴纸 → 按钮，顺序播放、互不重叠
+  function runStickerPanelIntro() {
+    return Promise.resolve()
+      .then(function () { return anim(600, function () { stickerFrame.classList.add('in'); }); })
+      .then(function () {
+        // 11 张贴纸逐个错峰淡入（Q23）
+        return new Promise(function (resolve) {
+          palettes.forEach(function (it, i) {
+            setTimeout(function () { it.el.classList.add('in'); }, i * STICKER_STAGGER_MS);
+          });
+          setTimeout(resolve, (palettes.length - 1) * STICKER_STAGGER_MS + STICKER_FADE_MS);
+        });
+      })
+      .then(function () {
+        return anim(500, function () {
+          btnReset.classList.add('in');
+          btnOk.classList.add('in');
+          btnOk.classList.add('dim');     // 出现后默认置灰；贴纸数 ≥ 3 才由 updateOkState() 转可用
+          setTimeout(function () {
+            // 入场动画跑完后切成快速过渡，hover 才不迟钝
+            btnReset.classList.add('settled');
+            btnOk.classList.add('settled');
+          }, 520);
+        });
+      });
+  }
+
+  // 玩法循环：事件驱动，等玩家点 OK。
+  // 注意必须先解除演出锁 —— 否则 waitClick / 各点击监听里的 busy 判定会把点击全吞掉。
+  function runStickerPlay() {
+    busy = false;
+    return new Promise(function (resolve) {
+      btnOk.addEventListener('click', function onOk() {
+        if (act3Done || !okReady) return;
+        act3Done = true;
+        btnOk.removeEventListener('click', onOk);
+        playSound();
+        cancelPlacing(true);        // 手上若还捏着一张，先取消，免得浮在蒙黑层之上
+        resolve();
+      });
+    });
+  }
+
+  /* ================= 第四幕：目标达成 ================= */
+  function runAct4() {
+    return Promise.resolve()
+      // 第三幕 UI 整体淡出（shadow.png 是 70% 半透明，不淡出会透过蒙黑层若隐若现）
+      .then(function () { return anim(300, function () { act3.classList.add('ui-out'); }); })
+      .then(function () { return anim(600, function () { shadow.classList.add('in'); }); })
+      .then(function () { return anim(450, function () { goal01.classList.add('in'); }); })
+      .then(function () { return anim(500, function () { btnContinue.classList.add('in'); }); })
+      .then(function () {
+        btnContinue.classList.add('ready');
+        setTimeout(function () { btnContinue.classList.add('settled'); }, 520);
+        return waitClick(btnContinue);          // Q20：点击 Continue 才转全黑，不自动延时
+      })
+      .then(function () {
+        blackout.classList.remove('fast');
+        return anim(700, function () { blackout.classList.add('in'); });
+      });
+  }
+
   /* ================= 主流程 ================= */
   function main() {
     return Promise.resolve()
 
-      // 0. 预加载（期间纯黑）
+      // 0. 预加载（期间纯黑）—— 只加载第一、二幕
       .then(preload)
 
       // 1. 第一幕：背景淡入
@@ -402,7 +975,7 @@
       .then(function () { return anim(600, function () { chat.classList.add('in'); }); })
 
       // 6. 打第 1 句
-      .then(function () { return typeText(LINE1); })
+      .then(function () { return typeText(LINE1, TYPE_SPEED, chatText); })
 
       // 7. 打完才出现 GO 按钮
       .then(function () { return anim(300, function () { btnGo.classList.add('in'); }); })
@@ -421,7 +994,7 @@
       .then(function () { return anim(450, function () { suitcase.classList.add('in'); }); })
 
       // 11. 打第 2 句
-      .then(function () { return typeText(LINE2); })
+      .then(function () { return typeText(LINE2, TYPE_SPEED, chatText); })
 
       // 12. 打完才再次出现 GO 按钮
       .then(function () { return anim(300, function () { btnGo.classList.add('in'); }); })
@@ -430,13 +1003,9 @@
       .then(function () { return waitClick(btnGo); })
 
       // 14. 隐藏按钮
-      .then(function () {
-        btnGo.classList.remove('in');
-        return sleep(300);
-      })
+      .then(function () { btnGo.classList.remove('in'); return sleep(300); })
 
-      // 15. 整个对话弹窗（chat.png 画面 + Luna 姓名牌 + 台词文本）淡出消失，
-      //     行李箱不再被它遮挡，在画面右侧完整露出
+      // 15. 整个对话弹窗（chat.png 画面 + Luna 姓名牌 + 台词文本）淡出消失
       .then(function () { return anim(400, function () { chat.classList.add('out'); }); })
 
       // 16. 然后引导手才出现，行李箱变为可点击
@@ -452,11 +1021,37 @@
         return anim(300, function () { hand.classList.remove('in'); });
       })
 
-      // 18. 渐变全黑，之后静止（#act3-slot 保持为空）
-      .then(function () { return anim(700, function () { blackout.classList.add('in'); }); })
+      // 18. 第二幕末尾：黑幕渐入 —— 本版起它是「转场」而非终点。
+      //     同时提前起跑三、四幕的预加载（不阻塞）。
+      .then(function () {
+        preloadAct34();
+        return anim(700, function () { blackout.classList.add('in'); });
+      })
+
+      // 19. 第三幕：视频 → 定格 → 第三句 → 面板入场 → 玩法循环 → 点 OK
+      .then(bindStickerPlay)
+      .then(runAct3Intro)
+      .then(runStickerPanelIntro)
+      .then(runStickerPlay)
+
+      // 20. 第四幕：蒙黑 → Goal → Continue → 全黑静止（Demo 结束）
+      .then(runAct4)
 
       .catch(function (err) { console.error('[new-journey]', err); });
   }
+
+  /* ================= 测试钩子（不影响正常表现） ================= */
+  window.__nj = {
+    setRotation: function (deg) { rotOverride = deg; },
+    clearRotation: function () { rotOverride = null; },
+    body: function () { return BODY; },
+    state: function () {
+      return {
+        count: stickerCount, okReady: okReady, placing: !!placing, act3Done: act3Done,
+        busy: busy, animLock: animLock
+      };
+    }
+  };
 
   /* ================= 启动 ================= */
   fitStage();

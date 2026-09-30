@@ -4,7 +4,12 @@
  *   node .workbuddy/tools/test.js          跑全部用例
  *   node .workbuddy/tools/test.js p1       只跑「问题1：台词文本位置」
  *   node .workbuddy/tools/test.js p2       只跑「问题2：chat 消失 -> hand 出现」
- *   node .workbuddy/tools/test.js flow     只跑「全流程回归」
+ *   node .workbuddy/tools/test.js flow     只跑「第一、二幕全流程回归」
+ *   node .workbuddy/tools/test.js a3       第三幕：视频 -> 定格 -> 第三句 -> 对话框消失
+ *   node .workbuddy/tools/test.js a3b      第三幕：面板 / 槽位 / 按钮几何
+ *   node .workbuddy/tools/test.js a3c      第三幕：自由落点玩法 + 缩放补偿专项
+ *   node .workbuddy/tools/test.js a4       第四幕：蒙黑 -> Goal -> Continue -> 全黑
+ *   node .workbuddy/tools/test.js full2    第一 ~ 第四幕全流程（真实播放视频）
  *
  * 退出码：0 = 全部通过，1 = 存在失败
  * 截图输出：.workbuddy/tools/shots/（已 gitignore，仅供人工目检）
@@ -142,7 +147,7 @@ const INK_TOP_FN = `(() => {
 /* ================= 主流程 ================= */
 (async () => {
   const which = process.argv.slice(2).filter((a) => !a.startsWith('-'));
-  const cases = which.length ? which : ['p1', 'p2', 'flow'];
+  const cases = which.length ? which : ['p1', 'p2', 'flow', 'a3', 'a3b', 'a3c', 'a4', 'full2'];
 
   const child = spawn(EDGE, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -497,11 +502,452 @@ const INK_TOP_FN = `(() => {
     })()`));
   }
 
-  const CASES = { p1: caseP1, p2: caseP2, flow: caseFlow };
+  /* ==================================================================
+     第三、四幕公共前置与工具
+     ================================================================== */
+  // 注意：不能叫 LINE3 —— 上面的 p1 用例已用同名常量做「3 行台词」回归
+  const LINE_ACT3 = 'Let\u2019s add our favourite stickers. Now it will be our exclusive suitcase!';
+
+  // 从零一路推进到「第三幕已激活」（第二幕黑幕已碎成转场）
+  const toAct3 = async () => {
+    await toAct2SecondLine();
+    await click('#btn-go');
+    await waitFor(`document.getElementById('hand').classList.contains('in')`, 6000, 'hand');
+    await sleep(500);
+    await click('#suitcase');
+    await waitFor(`document.getElementById('blackout').classList.contains('in')`, 10000, '第二幕黑幕');
+    await waitFor(`document.getElementById('act3').classList.contains('active')`, 15000, '第三幕激活');
+  };
+
+  // 继续推进到「面板入场完成、可以开始贴纸」：跳过视频 + 打完第三句 + 点 GO
+  const toAct3Panel = async () => {
+    await toAct3();
+    await waitFor(`!document.getElementById('blackout').classList.contains('in')`, 20000, '黑幕淡出露出视频');
+    // 视频太快跳过：拖到结尾触发 ended（真实播放留给 full2）
+    await evaluate(`(() => {
+      const e = document.getElementById('act3-video');
+      if (e.readyState >= 1 && e.duration > 0) e.currentTime = Math.max(0, e.duration - 0.4);
+    })()`);
+    await waitFor(`document.getElementById('chat3').classList.contains('in')`, 20000, 'chat3 滑入');
+    await waitFor(`document.getElementById('btn-go3').classList.contains('in')`, 25000, '第三句打完');
+    await sleep(300);
+    await click('#btn-go3');                       // 对话框整体消失
+    await waitFor(`document.getElementById('sticker-frame').classList.contains('in')`, 10000, '面板滑入');
+    await waitFor(`document.getElementById('btn-ok').classList.contains('in')`, 12000, '按钮滑入');
+    // ⚠️ .in 类加上的瞬间按钮入场动画（500ms）仍在跑、busy 锁未释放，
+    // 此时点击会被判定为「演出期间」而吞掉。必须等锁真正释放。
+    await waitFor(`window.__nj.state().busy === false`, 5000, '演出锁释放');
+    await sleep(150);
+  };
+
+  // 在「画布坐标」处点击：先把画布坐标换算成视口坐标，再派发真实鼠标事件。
+  // 这正是自由落点玩法最容易出错的地方（#stage 带 scale），测试端也必须换算。
+  const clickCanvas = async (cx, cy) => {
+    const pt = await evaluate(`(() => {
+      const r = document.getElementById('stage').getBoundingClientRect();
+      const s = r.width / ${STAGE_W};
+      return { x: r.left + ${cx} * s, y: r.top + ${cy} * s };
+    })()`);
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pt.x, y: pt.y });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
+  };
+
+  // 已落定贴纸的中心（布局坐标，不受 transform / 动画影响）
+  const placedCenters = () => evaluate(`(() => {
+    const stage = document.getElementById('stage');
+    return [].map.call(document.querySelectorAll('#sticker-layer .placed'), (el) => {
+      let x = 0, y = 0, n = el;
+      while (n && n !== stage) { x += n.offsetLeft; y += n.offsetTop; n = n.offsetParent; }
+      return { cx: +(x + el.offsetWidth / 2).toFixed(2), cy: +(y + el.offsetHeight / 2).toFixed(2) };
+    });
+  })()`);
+
+  const njState = () => evaluate(`window.__nj.state()`);
+  const placedCount = () => evaluate(`document.querySelectorAll('#sticker-layer .placed').length`);
+  const usedPalettes = () =>
+    evaluate(`document.querySelectorAll('#sticker-panel .palette.used').length`);
+  const cursorCount = () => evaluate(`document.querySelectorAll('#sticker-cursor img').length`);
+  const paletteSel = (key) => `#sticker-panel .palette[data-sticker="${key}"]`;
+
+  // 点面板贴纸 → 在画布坐标落定（含等待过渡锁释放）
+  const place = async (key, cx, cy) => {
+    await click(paletteSel(key));
+    await sleep(120);
+    await clickCanvas(cx, cy);
+    await sleep(320);            // 等落定过渡锁（250ms）释放
+  };
+
+  /* ================= 用例 a3：视频 → 定格 → 第三句 → GO 消失对话框 ================= */
+  async function caseA3() {
+    await toAct3();
+
+    // --- A1 视频：几何铺满、静音、内联播放 ---
+    const v = await box('#act3-video');
+    assertEq('a3 视频 左边缘 = 0', v.left, 0, 0);
+    assertEq('a3 视频 顶边 = 0', v.top, 0, 0);
+    assertEq('a3 视频 宽 = 1200（铺满）', v.width, 1200, 0);
+    assertEq('a3 视频 高 = 896（铺满）', v.height, 896, 0);
+    assertTrue('a3 视频 静音播放（Q8）',
+      await evaluate(`document.getElementById('act3-video').muted === true`));
+    assertTrue('a3 视频 playsinline',
+      await evaluate(`document.getElementById('act3-video').playsInline === true`));
+    assertEq('a3 视频 原始尺寸 1112x834（与画布仅差 0.45% 纵横比）',
+      await evaluate(`(()=>{const e=document.getElementById('act3-video');return e.videoWidth*10000+e.videoHeight})()`),
+      11120834, 0);
+
+    // --- 黑幕淡出后露出视频，且视频确实在推进 ---
+    await waitFor(`!document.getElementById('blackout').classList.contains('in')`, 20000, '黑幕淡出露出视频');
+    await waitFor(`document.getElementById('act3-video').currentTime > 0`, 8000, '视频开始推进');
+    assertTrue('a3 视频已在自动播放（Q11：无需再次点击）',
+      (await evaluate(`document.getElementById('act3-video').currentTime`)) > 0);
+    await sleep(500);   // 等黑幕 400ms 淡出走完
+    assertEq('a3 露出视频后黑幕透明', await effOpacity('#blackout'), 0, 0.01);
+    assertTrue('a3 视频播放期间点击仍被拦截（#blackout.guard）',
+      await hasClass('#blackout', 'guard'));
+    await shot('a3-1-video');
+
+    // 视频太长，快进到结尾（真实播放留给 full2 用例）
+    await evaluate(`(() => { const e = document.getElementById('act3-video');
+      e.currentTime = Math.max(0, e.duration - 0.4); })()`);
+
+    // --- A2 定格 + chat3 滑入 ---
+    await waitFor(`document.getElementById('chat3').classList.contains('in')`, 15000, 'chat3 滑入');
+    await sleep(700);
+    assertEq('a3 视频已淡出（定格图露出）', await effOpacity('#act3-video'), 0, 0.01);
+    assertEq('a3 定格图 全屏可见', await effOpacity('#bg-room-suitcase'), 1, 0.01);
+    assertTrue('a3 播放结束后守卫已解除', !(await hasClass('#blackout', 'guard')));
+
+    const c3 = await box('#chat3');
+    assertEq('a3 chat3 贴底（距画面底 = 0）', c3.fromBottom, 0);
+    assertEq('a3 chat3 高 = 496', c3.height, 496, 0);
+    assertEq('a3 chat3 顶边 = 400', c3.top, 400, 0);
+    const t3 = await box('#chat3 .chat-text');
+    assertEq('a3 第三句文本 左边缘 = 380（复用第二幕几何）', t3.left, 380);
+    assertEq('a3 第三句文本 顶边 = 770.4', t3.top, 770.4);
+    assertEq('a3 第三句文本 宽 = 640', t3.width, 640, 0);
+
+    // --- 打字期间 GO 不在画面 ---
+    assertEq('a3 第三句打字期间 btn-go3 不在画面', await effOpacity('#btn-go3'), 0, 0.01);
+    assertTrue('a3 第三句正在逐字增长',
+      (await evaluate(`document.querySelector('#chat3 .chat-text').textContent.length`)) < LINE_ACT3.length);
+
+    await waitFor(`document.getElementById('btn-go3').classList.contains('in')`, 25000, '第三句打完');
+    await sleep(400);
+    await shot('a3-2-line3');
+    assertTrue('a3 第三句文案与需求一致（含弯引号 Let\u2019s）',
+      (await evaluate(`document.querySelector('#chat3 .chat-text').textContent`)) === LINE_ACT3);
+    assertEq('a3 btn-go3 距画面右 = 100', (await box('#btn-go3')).fromRight, 100);
+    assertEq('a3 btn-go3 底边距画面底 = 50', (await box('#btn-go3')).fromBottom, 50);
+
+    // --- A3 点击 GO：整个对话框（含姓名牌）整体消失 ---
+    await click('#btn-go3');
+    await waitFor(`document.getElementById('chat3').classList.contains('out')`, 3000, 'chat3 消失');
+    await sleep(600);
+    assertEq('a3 点击 GO 后 chat3 整个对话框有效透明度 = 0', await effOpacity('#chat3'), 0, 0.01);
+    assertEq('a3 点击 GO 后姓名牌所在图 chat-frame 也全透明',
+      await effOpacity('#chat3 .chat-frame'), 0, 0.01);
+    assertTrue('a3 点击 GO 后第三句文本已清空',
+      (await evaluate(`document.querySelector('#chat3 .chat-text').textContent`)) === '');
+    assertTrue('a3 btn-go3 已隐藏', !(await hasClass('#btn-go3', 'in')));
+
+    // --- A4 面板入场 ---
+    await waitFor(`document.getElementById('sticker-frame').classList.contains('in')`, 8000, '面板滑入');
+    await waitFor(`document.getElementById('btn-ok').classList.contains('in')`, 12000, '按钮滑入');
+    await sleep(300);
+    await shot('a3-3-panel');
+    assertEq('a3 面板入场完成后 11 张贴纸全部可见',
+      await evaluate(`document.querySelectorAll('#sticker-panel .palette.in').length`), 11, 0);
+  }
+
+  /* ================= 用例 a3b：第三幕几何（面板 / 槽位 / 按钮） ================= */
+  async function caseA3b() {
+    await toAct3Panel();
+
+    // --- 面板：距顶 45 / 距右 25 ---
+    const fr = await box('#sticker-frame');
+    assertEq('a3b 面板 左边缘 = 653（距右 25）', fr.left, 653, 0);
+    assertEq('a3b 面板 距画面右 = 25', fr.fromRight, 25, 0);
+    assertEq('a3b 面板 顶边 = 45', fr.top, 45, 0);
+    assertEq('a3b 面板 宽 = 522', fr.width, 522, 0);
+    assertEq('a3b 面板 高 = 630', fr.height, 630, 0);
+    assertEq('a3b 面板 下边缘 = 675', fr.top + fr.height, 675, 0);
+
+    // --- 11 张贴纸逐格对位（列 690/847/1004 × 行 91/225/361/495，第 12 格留空） ---
+    const EXP = [
+      ['bag', 690, 91], ['camera', 847, 91], ['drink', 1004, 91],
+      ['flower', 690, 225], ['love', 847, 225], ['mountant', 1004, 225],
+      ['passport', 690, 361], ['planet', 847, 361], ['rainboat', 1004, 361],
+      ['travel', 690, 495], ['tree', 847, 495],
+    ];
+    assertEq('a3b 调色板贴纸数量 = 11', await evaluate(`document.querySelectorAll('#sticker-panel .palette').length`), 11, 0);
+    for (const [key, x, y] of EXP) {
+      const b = await box(paletteSel(key));
+      assertEq(`a3b ${key} 槽位 left=${x} / top=${y}`, b.left * 100000 + b.top, x * 100000 + y, 0);
+      assertEq(`a3b ${key} 尺寸 142x119`, b.width * 1000 + b.height, 142119, 0);
+      assertEq(`a3b ${key} 可见`, await effOpacity(paletteSel(key)), 1, 0.01);
+    }
+    // 第 4 行第 3 格（1004, 495）必须留空
+    assertEq('a3b 第 12 格（1004,495）留空无贴纸',
+      await evaluate(`(() => {
+        const hit = [].filter.call(document.querySelectorAll('#sticker-panel .palette'), (el) =>
+          parseFloat(el.style.left) === 1004 && parseFloat(el.style.top) === 495);
+        return hit.length;
+      })()`), 0, 0);
+
+    // --- 按钮：同一水平线 top 714（距底 85），OK 距右 25，RESET 距 OK 70 ---
+    const ok = await box('#btn-ok');
+    const rs = await box('#btn-reset');
+    assertEq('a3b OK 左边缘 = 949（距右 25）', ok.left, 949, 0);
+    assertEq('a3b OK 距画面右 = 25', ok.fromRight, 25, 0);
+    assertEq('a3b OK 顶边 = 714（距底 85）', ok.top, 714, 0);
+    assertEq('a3b OK 底边距画面底 = 85', ok.fromBottom, 85, 0);
+    assertEq('a3b OK 尺寸 226x97', ok.width * 1000 + ok.height, 226097, 0);
+    assertEq('a3b RESET 左边缘 = 652', rs.left, 652, 0);
+    assertEq('a3b RESET 顶边 = 714（与 OK 同一水平线）', rs.top, 714, 0);
+    assertEq('a3b RESET 尺寸 227x97', rs.width * 1000 + rs.height, 227097, 0);
+    assertEq('a3b RESET 右边缘与 OK 左边缘间距 = 70', ok.left - (rs.left + rs.width), 70, 0);
+    assertEq('a3b OK 右边缘 = 1175（与面板右边缘对齐）', ok.left + ok.width, 1175, 0);
+    assertEq('a3b 面板下边缘与按钮上边缘间隙 = 39', rs.top - (fr.top + fr.height), 39, 0);
+
+    // --- 初始态：0 张贴纸 -> OK 置灰不可点 ---
+    assertTrue('a3b 初始 OK 已置灰（class 含 dim）', await hasClass('#btn-ok', 'dim'));
+    assertTrue('a3b 初始 OK 不可点击', (await box('#btn-ok')).pointerEvents === 'none');
+    assertEq('a3b 初始 OK 有效透明度 = 0.45（置灰）', await effOpacity('#btn-ok'), 0.45, 0.02);
+    assertTrue('a3b RESET 可点击', (await box('#btn-reset')).pointerEvents === 'auto');
+    await shot('a3b-panel-geometry');
+  }
+
+  /* ================= 用例 a3c：自由落点玩法（含缩放补偿专项） ================= */
+  async function caseA3c() {
+    await toAct3Panel();
+    await evaluate(`window.__nj.setRotation(0)`);   // 固定旋转角，保证可复现
+
+    // --- ① 选中面板贴纸 -> 待放置并跟随光标 ---
+    await click(paletteSel('bag'));
+    await sleep(300);
+    assertTrue('a3c 点击面板贴纸后进入待放置态', (await njState()).placing === true);
+    assertEq('a3c 该贴纸在面板中置灰', await usedPalettes(), 1);
+    assertEq('a3c 跟随层出现 1 张手持贴纸', await cursorCount(), 1);
+    await shot('a3c-1-picking');
+
+    // --- ② 箱身内落定：以点击点为中心 ---
+    await clickCanvas(300, 500);
+    await sleep(320);
+    assertEq('a3c 箱身内点击后落定 1 张', await placedCount(), 1);
+    assertEq('a3c 计数 = 1', (await njState()).count, 1);
+    assertEq('a3c 待放置态已结束', (await njState()).placing === false ? 0 : 1, 0);
+    assertEq('a3c 跟随层已清空', await cursorCount(), 0);
+    let centers = await placedCenters();
+    assertEq('a3c 落定中心 x = 点击点 300', centers[0].cx, 300, 0.6);
+    assertEq('a3c 落定中心 y = 点击点 500', centers[0].cy, 500, 0.6);
+    assertEq('a3c 落定尺寸为素材原尺寸 142x119',
+      await evaluate(`(() => { const e = document.querySelector('#sticker-layer .placed');
+        return e.offsetWidth * 1000 + e.offsetHeight; })()`), 142119, 0);
+
+    // --- ③ 同一张贴纸不可重复使用（Q15） ---
+    await click(paletteSel('bag'));
+    await sleep(250);
+    assertEq('a3c 已用过的贴纸无法再次选中（计数不变）', (await njState()).count, 1);
+    assertEq('a3c 已用过的贴纸不会进入待放置态', (await njState()).placing === false ? 0 : 1, 0);
+    assertEq('a3c 落定数量仍为 1', await placedCount(), 1);
+
+    // --- ④ 自由落点：换不同位置再贴 2 张，凑满 3 张 ---
+    await place('camera', 220, 300);
+    await place('drink', 480, 700);
+    centers = await placedCenters();
+    assertEq('a3c 三张贴纸数量', centers.length, 3, 0);
+    assertEq('a3c 第 2 张贴纸落点自由（220,300）', centers[1].cx * 1000 + centers[1].cy, 220300, 0.6);
+    assertEq('a3c 第 3 张贴纸落点自由（480,700）', centers[2].cx * 1000 + centers[2].cy, 480700, 0.6);
+    assertEq('a3c 计数 = 3', (await njState()).count, 3);
+
+    // --- ⑤ 贴纸数 ≥ 3 -> OK 转为可用（Q16） ---
+    assertTrue('a3c 满 3 张后 OK 转为可用', (await njState()).okReady === true);
+    assertTrue('a3c OK 已去掉置灰态', !(await hasClass('#btn-ok', 'dim')));
+    assertTrue('a3c OK 已可点击', (await box('#btn-ok')).pointerEvents === 'auto');
+    assertEq('a3c OK 满 3 张后有效透明度 = 1', await effOpacity('#btn-ok'), 1, 0.02);
+    await shot('a3c-2-three-placed');
+
+    // --- ⑥ 箱身外点击 -> 贴纸飞回槽位并取消，不计数（Q24） ---
+    await click(paletteSel('flower'));
+    await sleep(300);
+    assertTrue('a3c 箱身外点击前确实处于待放置态', (await njState()).placing === true);
+    await clickCanvas(600, 200);                 // 明确在箱身之外、面板之外的空白区
+    await sleep(400);
+    assertTrue('a3c 箱身外点击后待放置态被取消', (await njState()).placing === false);
+    assertEq('a3c 箱身外点击不计数（仍为 3）', (await njState()).count, 3);
+    assertEq('a3c 箱身外点击不落定（仍为 3 张）', await placedCount(), 3);
+    assertEq('a3c 飞回后跟随层已清空', await cursorCount(), 0);
+    assertTrue('a3c 该贴纸已恢复面板可点', !(await hasClass(paletteSel('flower'), 'used')));
+    assertEq('a3c 面板置灰数量回到 3', await usedPalettes(), 3);
+
+    // 贴纸框右边缘外 1px 也属于「箱身之外」
+    await click(paletteSel('flower'));
+    await sleep(200);
+    await clickCanvas(537, 500);
+    await sleep(400);
+    assertEq('a3c 箱身右边界外 1px -> 不落定', await placedCount(), 3);
+    assertEq('a3c 箱身右边界外 1px -> 不计数', (await njState()).count, 3);
+
+    // --- ⑦ 待放置时点面板另一张 -> 切换目标（前一张飞回槽位） ---
+    await click(paletteSel('love'));
+    await sleep(200);
+    await click(paletteSel('planet'));
+    await sleep(300);
+    assertTrue('a3c 切换目标后仍在待放置态', (await njState()).placing === true);
+    assertTrue('a3c 被切换掉的贴纸已恢复面板可点', !(await hasClass(paletteSel('love'), 'used')));
+    assertEq('a3c 切换后跟随层仍只有 1 张', await cursorCount(), 1);
+    await clickCanvas(300, 700);                 // 落定，恢复干净状态
+    await sleep(320);
+    assertEq('a3c 切换目标后落定成功，共 4 张', await placedCount(), 4);
+
+    // --- ⑧ 缩放补偿专项：s = 0.75 下落点仍精确落在鼠标所指处 ---
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: 900, height: 672, deviceScaleFactor: 1, mobile: false });
+    await evaluate(`window.dispatchEvent(new Event('resize'))`);
+    await sleep(350);
+    const sc = await evaluate(`(() => { const r = document.getElementById('stage').getBoundingClientRect();
+      return +(r.width / ${STAGE_W}).toFixed(4); })()`);
+    assertEq('a3c 缩放到 900x672 时 scale = 0.75', sc, 0.75, 0.002);
+    // 用一个尚未使用的位置重新贴（先 RESET 清干净）
+    await click('#btn-reset');
+    await sleep(300);
+    assertEq('a3c RESET 后箱身贴纸全部清除', await placedCount(), 0);
+    assertEq('a3c RESET 后计数归零', (await njState()).count, 0);
+    assertEq('a3c RESET 后调色板 11 张全部恢复', await usedPalettes(), 0);
+    assertTrue('a3c RESET 后 OK 回到置灰态', await hasClass('#btn-ok', 'dim'));
+    assertTrue('a3c RESET 后 OK 不可点击', (await box('#btn-ok')).pointerEvents === 'none');
+
+    await place('tree', 343, 512);
+    const scaled = await placedCenters();
+    assertEq('a3c 缩放 0.75 下落定数量 = 1', scaled.length, 1, 0);
+    assertEq('a3c 缩放 0.75 下落点 x 精确 = 343（误差 ≤1px）', scaled[0].cx, 343, 1);
+    assertEq('a3c 缩放 0.75 下落点 y 精确 = 512（误差 ≤1px）', scaled[0].cy, 512, 1);
+    await shot('a3c-3-scaled');
+
+    // 还原视口，避免影响后续用例
+    await cdp.send('Emulation.setDeviceMetricsOverride', { width: STAGE_W, height: STAGE_H, deviceScaleFactor: 1, mobile: false });
+    await evaluate(`window.dispatchEvent(new Event('resize'))`);
+    await sleep(300);
+  }
+
+  /* ================= 用例 a4：第四幕目标达成 ================= */
+  async function caseA4() {
+    await toAct3Panel();
+    await evaluate(`window.__nj.setRotation(0)`);
+
+    // 先贴满 3 张让 OK 可用
+    await place('bag', 250, 400);
+    await place('camera', 400, 550);
+    await place('drink', 300, 680);
+    assertTrue('a4 前置：OK 已可用', (await njState()).okReady === true);
+
+    // shadow.png 本身必须真的是「半透明黑」，否则「画面蒙黑」就成了全黑
+    const px = await evaluate(`(() => new Promise((resolve) => {
+      const im = new Image();
+      im.onload = () => {
+        const c = document.createElement('canvas');
+        c.width = im.naturalWidth; c.height = im.naturalHeight;
+        const x = c.getContext('2d');
+        x.drawImage(im, 0, 0);
+        const d = x.getImageData(600, 400, 1, 1).data;
+        resolve([d[0], d[1], d[2], d[3], im.naturalWidth, im.naturalHeight]);
+      };
+      im.src = 'assets/screen4/shadow.png';
+    }))()`);
+    assertEq('a4 shadow.png 尺寸 1200x896', px[4] * 1000 + px[5], 1200896, 0);
+    assertTrue('a4 shadow.png 是纯黑且半透明（α≈179 而非 255）', px[0] === 0 && px[1] === 0 && px[2] === 0 && px[3] > 150 && px[3] < 210,
+      'RGBA = ' + px.join(','));
+
+    await click('#btn-ok');
+    await sleep(200);
+    assertTrue('a4 点击 OK 后第三幕 UI 进入淡出态', await hasClass('#act3', 'ui-out'));
+    await waitFor(`document.getElementById('shadow').classList.contains('in')`, 6000, '蒙黑层淡入');
+    await sleep(800);
+    await shot('a4-1-mask');
+    assertEq('a4 第三幕面板已淡出（不透过蒙黑层若隐若现）', await effOpacity('#sticker-panel'), 0, 0.01);
+    // 箱身上已落定的贴纸属于玩家的作品，刻意保留不清 —— 达成页里仍是「装饰好的行李箱」
+    assertEq('a4 箱身已落定贴纸保留在画面中', await effOpacity('#sticker-layer'), 1, 0.01);
+    assertEq('a4 箱身已落定贴纸数量仍为 3', await placedCount(), 3, 0);
+    assertEq('a4 第三幕 RESET 按钮已淡出', await effOpacity('#btn-reset'), 0, 0.02);
+    assertEq('a4 蒙黑层可见', await effOpacity('#shadow'), 1, 0.01);
+
+    // goal01 / continue 几何
+    await waitFor(`document.getElementById('goal01').classList.contains('in')`, 6000, 'goal01 出现');
+    await sleep(600);
+    const g = await box('#goal01');
+    assertEq('a4 goal01 左边缘 = 221（水平居中）', g.left, 221, 0);
+    assertEq('a4 goal01 距画面右 = 221', g.fromRight, 221, 0);
+    assertEq('a4 goal01 顶边 = 120（Q18）', g.top, 120, 0);
+    assertEq('a4 goal01 尺寸 758x579', g.width * 1000 + g.height, 758579, 0);
+
+    await waitFor(`document.getElementById('continue').classList.contains('in')`, 6000, 'Continue 滑入');
+    await sleep(600);
+    await shot('a4-2-goal');
+    const cc = await box('#continue');
+    assertEq('a4 Continue 左边缘 = 467.5（水平居中）', cc.left, 467.5, 0.6);
+    assertEq('a4 Continue 底边距画面底 = 95', cc.fromBottom, 95, 0.6);
+    assertEq('a4 Continue 顶边 = 770', cc.top, 770, 0.6);
+    assertEq('a4 Continue 尺寸 265x31', cc.width * 1000 + cc.height, 265031, 0);
+    assertTrue('a4 Continue 是唯一可点击元素', (await box('#continue')).pointerEvents === 'auto');
+    assertEq('a4 goal01 与 Continue 之间留出间隙',
+      (await box('#continue')).top - (g.top + g.height), 71, 0.6);
+
+    // Q20：点击 Continue 才转全黑，不自动延时
+    assertTrue('a4 Continue 出现后画面尚未全黑（未自动跳转）', !(await hasClass('#blackout', 'in')));
+    await click('#continue');
+    await waitFor(`document.getElementById('blackout').classList.contains('in')`, 6000, '全黑');
+    await sleep(900);
+    await shot('a4-3-final-black');
+    assertEq('a4 点击 Continue 后画面纯黑', await effOpacity('#blackout'), 1, 0.01);
+    assertTrue('a4 #act5-slot 预留容器存在且为空',
+      await evaluate(`(() => { const s = document.getElementById('act5-slot');
+        return !!s && s.children.length === 0 && s.textContent.trim() === ''; })()`));
+  }
+
+  /* ================= 用例 full2：第一 ~ 第四幕全流程（真实播放视频） ================= */
+  async function caseFull2() {
+    await toAct3();
+    // 真等视频播完（不快进），验证真实时序
+    await waitFor(`document.getElementById('act3-video').currentTime > 0`, 10000, '视频开播');
+    await waitFor(`document.getElementById('chat3').classList.contains('in')`, 20000, '视频播完并滑入对话框');
+    assertEq('full2 视频播完后已淡化（定格图接管）', await effOpacity('#act3-video'), 0, 0.01);
+
+    await waitFor(`document.getElementById('btn-go3').classList.contains('in')`, 25000, '第三句打完');
+    await sleep(300);
+    await click('#btn-go3');
+    await waitFor(`document.getElementById('sticker-frame').classList.contains('in')`, 10000, '面板滑入');
+    await waitFor(`document.getElementById('btn-ok').classList.contains('in')`, 12000, '按钮滑入');
+    await waitFor(`window.__nj.state().busy === false`, 5000, '演出锁释放');
+    await sleep(150);
+
+    await evaluate(`window.__nj.setRotation(0)`);
+    await place('bag', 260, 380);
+    await place('love', 420, 520);
+    await place('travel', 320, 660);
+    assertEq('full2 贴满 3 张', await placedCount(), 3);
+    assertTrue('full2 OK 可用', (await njState()).okReady === true);
+    await shot('full2-1-stickers');
+
+    await click('#btn-ok');
+    await waitFor(`document.getElementById('continue').classList.contains('in')`, 10000, 'Continue 滑入');
+    await sleep(600);
+    await shot('full2-2-goal');
+    await click('#continue');
+    await waitFor(`document.getElementById('blackout').classList.contains('in')`, 6000, '全黑');
+    await sleep(900);
+    await shot('full2-3-black');
+    assertEq('full2 终态纯黑', await effOpacity('#blackout'), 1, 0.01);
+    assertTrue('full2 全流程无控制台报错（末段）', errors.length === 0, errors.join(' | '));
+  }
+
+  const CASES = {
+    p1: caseP1, p2: caseP2, flow: caseFlow,
+    a3: caseA3, a3b: caseA3b, a3c: caseA3c, a4: caseA4, full2: caseFull2,
+  };
 
   for (const name of cases) {
     console.log('\n=== 用例 ' + name + ' ===');
-    if (!CASES[name]) { fail('未知用例 ' + name, '可选: p1 / p2 / flow'); continue; }
+    if (!CASES[name]) { fail('未知用例 ' + name, '可选: p1 / p2 / flow / a3 / a3b / a3c / a4 / full2'); continue; }
     try {
       await reload();
       await CASES[name]();
