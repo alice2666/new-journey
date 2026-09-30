@@ -295,13 +295,19 @@
     opacity: 0; transition: opacity .6s ease-out;
   }
   #shadow.in { opacity: 1; }
-  /* goal01：水平居中 / 距顶 120 -> left 221 / top 120 */
+  /* goal01：水平居中 / 距顶 120 -> left 221 / top 120
+     出现方式（用户指定）：**从上到下快速落下**。
+     初始整张卡片在画布上方之外（下边缘 699 - 720 = -21 < 0），
+     再沿 Y 轴加速落到位，落点即 top 120。ease-in 的加速段模拟自由落体，
+     手感是「落」不是「滑」；opacity 只用 120ms 快速点亮，
+     保证卡片一进入画布就已经可见，而不是落到位才浮现。 */
   #goal01 {
     position: absolute; left: 221px; top: 120px; width: 758px; height: 579px; z-index: 95;
-    opacity: 0; transform: scale(.92);
-    transition: opacity .45s ease-out, transform .45s ease-out;
+    opacity: 0;
+    transform: translateY(-720px);
+    transition: transform .38s cubic-bezier(.55, 0, .85, .35), opacity .12s ease-out;
   }
-  #goal01.in { opacity: 1; transform: scale(1); }
+  #goal01.in { opacity: 1; transform: translateY(0); }
   /* Continue：水平居中 / 距底 95 -> left 467.5 / top 770 */
   #continue {
     position: absolute; left: 467.5px; top: 770px; width: 265px; height: 31px; z-index: 96;
@@ -1104,7 +1110,8 @@
       // 第三幕 UI 整体淡出（shadow.png 是 70% 半透明，不淡出会透过蒙黑层若隐若现）
       .then(function () { return anim(300, function () { act3.classList.add('ui-out'); }); })
       .then(function () { return anim(600, function () { shadow.classList.add('in'); }); })
-      .then(function () { return anim(450, function () { goal01.classList.add('in'); }); })
+      // 落下 380ms（用户指定：从上到下快速落下），与 CSS transition 时长保持一致
+      .then(function () { return anim(380, function () { goal01.classList.add('in'); }); })
       .then(function () { return anim(500, function () { btnContinue.classList.add('in'); }); })
       .then(function () {
         btnContinue.classList.add('ready');

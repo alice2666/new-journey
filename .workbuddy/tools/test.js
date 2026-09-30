@@ -9,7 +9,7 @@
  *   node .workbuddy/tools/test.js a3       第三幕：视频 -> 定格 -> 第三句 -> 对话框消失
  *   node .workbuddy/tools/test.js a3b      第三幕：面板 / 槽位 / 按钮几何
  *   node .workbuddy/tools/test.js a3c      第三幕：自由落点玩法 + 缩放补偿专项
- *   node .workbuddy/tools/test.js a4       第四幕：蒙黑 -> Goal -> Continue -> 全黑
+ *   node .workbuddy/tools/test.js a4       第四幕：蒙黑 -> Goal（从上到下快速落下）-> Continue -> 全黑
  *   node .workbuddy/tools/test.js full2    第一 ~ 第四幕全流程（真实播放视频）
  *
  * 退出码：0 = 全部通过，1 = 存在失败
@@ -1007,6 +1007,39 @@ const INK_TOP_FN = `(() => {
     assertTrue('a4 shadow.png 是纯黑且半透明（α≈179 而非 255）', px[0] === 0 && px[1] === 0 && px[2] === 0 && px[3] > 150 && px[3] < 210,
       'RGBA = ' + px.join(','));
 
+    // ---- goal01 的「从上到下快速落下」动作：必须在点 OK 之前就把探针装进页面 ----
+    // 注意：布局坐标（offsetTop）不受 transform 影响，量不出「落下」；
+    // 只有 computed transform 的 translateY 才反映卡片此刻的真实垂直位置。
+    // 用 setInterval 而不是 rAF 采样：headless 下 rAF 可能被降频，而过渡值由时间线驱动，
+    // 即便不重绘也会随样式重算推进，采样更密更稳。
+    await evaluate(`(() => {
+      window.__drop = [];
+      const el = document.getElementById('goal01');
+      const t0 = performance.now();
+      const read = () => {
+        const cs = getComputedStyle(el);
+        const m = cs.transform;
+        let tx = 0, ty = 0;
+        if (m && m.indexOf('matrix') === 0) {
+          const n = m.slice(m.indexOf('(') + 1, m.lastIndexOf(')')).split(',').map(Number);
+          if (n.length === 6) { tx = n[4]; ty = n[5]; }
+          else { tx = n[12]; ty = n[13]; }
+        }
+        window.__drop.push({
+          t: Math.round(performance.now() - t0),
+          tx: +tx.toFixed(2), ty: +ty.toFixed(2),
+          op: +(+cs.opacity).toFixed(3),
+          in: el.classList.contains('in')
+        });
+      };
+      window.__dropTimer = setInterval(() => {
+        read();
+        if (performance.now() - t0 > 6000) clearInterval(window.__dropTimer);
+      }, 10);
+      read();
+      return true;
+    })()`);
+
     await click('#btn-ok');
     await sleep(200);
     assertTrue('a4 点击 OK 后第三幕 UI 进入淡出态', await hasClass('#act3', 'ui-out'));
@@ -1028,6 +1061,54 @@ const INK_TOP_FN = `(() => {
     assertEq('a4 goal01 距画面右 = 221', g.fromRight, 221, 0);
     assertEq('a4 goal01 顶边 = 120（Q18）', g.top, 120, 0);
     assertEq('a4 goal01 尺寸 758x579', g.width * 1000 + g.height, 758579, 0);
+
+    /* ---- 动作复核（用户指定）：goal01 必须「从上到下快速落下」 ----
+       旧实现是「淡入 + 轻微放大（scale .92 → 1）」，方向是原地放大，
+       不是下落。这里用动画期间的 computed transform 采样把方向与速度钉死。 */
+    const drop = await evaluate(`(() => {
+      clearInterval(window.__dropTimer);
+      const all = window.__drop.slice();
+      const after = all.filter(r => r.in);
+      const first = after[0] || null;
+      const last = all[all.length - 1] || null;
+      let landAt = null;
+      for (let i = 0; i < after.length; i++) { if (after[i].ty >= -0.5) { landAt = after[i].t; break; } }
+      // 中间态 = 已落进画布（下边缘越过画布顶）但尚未落定
+      const mid = after.filter(r => r.ty > -699 && r.ty < -5);
+      let mono = true;
+      for (let i = 1; i < after.length; i++) { if (after[i].ty < after[i - 1].ty - 0.6) mono = false; }
+      let txMax = 0, opMin = 2;
+      all.forEach(r => { txMax = Math.max(txMax, Math.abs(r.tx)); });
+      mid.forEach(r => { opMin = Math.min(opMin, r.op); });
+      const raw = getComputedStyle(document.getElementById('goal01')).transitionDuration.split(',')[0].trim();
+      const cssDurMs = raw.indexOf('ms') > -1 ? parseFloat(raw) : parseFloat(raw) * 1000;
+      return {
+        afterN: after.length, startTy: first ? first.ty : null, endTy: last.ty,
+        landAt: landAt, firstInT: first ? first.t : null,
+        midCount: mid.length, midOpMin: mid.length ? opMin : null,
+        mono: mono, txMax: +txMax.toFixed(2), cssDurMs: cssDurMs
+      };
+    })()`);
+
+    assertTrue('a4 落下动作：探针采到足够的动画帧样本', drop.afterN >= 10, JSON.stringify(drop));
+    assertTrue('a4 落下动作：起点整张卡片在画布上方之外（下边缘 699+ty ≤ 0）',
+      drop.startTy !== null && drop.startTy + 699 <= 0, 'startTy = ' + drop.startTy);
+    assertEq('a4 落下动作：起点 translateY = -720', drop.startTy, -720, 2);
+    assertTrue('a4 落下动作：落点 translateY = 0（无残余位移）', Math.abs(drop.endTy) <= 0.5, 'endTy = ' + drop.endTy);
+    assertTrue('a4 落下动作：是自上而下的单调运动（无回弹 / 无反向）', drop.mono === true);
+    assertTrue('a4 落下动作：拍到 ≥3 个「已进入画布但未落定」的中间态（不是瞬间闪现）',
+      drop.midCount >= 3, 'midCount = ' + drop.midCount);
+    assertTrue('a4 落下动作：只有垂直位移（|tx| < 0.5，无横向漂移、无缩放）',
+      drop.txMax < 0.5, 'txMax = ' + drop.txMax);
+    assertTrue('a4 落下动作：一边落一边可见（中间态 opacity 已 ≥ 0.5，不是落到位才浮现）',
+      drop.midOpMin !== null && drop.midOpMin >= 0.5, 'midOpMin = ' + drop.midOpMin);
+    assertTrue('a4 落下动作：CSS 位移时长 ≤ 500ms（「快速」）',
+      drop.cssDurMs > 0 && drop.cssDurMs <= 500, 'cssDurMs = ' + drop.cssDurMs);
+    assertTrue('a4 落下动作：实际下落耗时 ≤ 700ms',
+      drop.landAt !== null && drop.firstInT !== null && (drop.landAt - drop.firstInT) <= 700,
+      '实测 ' + (drop.landAt - drop.firstInT) + 'ms');
+    assertTrue('a4 落下动作：过渡属性含 transform（不是靠 opacity 伪装的出现）',
+      (await evaluate(`getComputedStyle(document.getElementById('goal01')).transitionProperty`)).indexOf('transform') > -1);
 
     await waitFor(`document.getElementById('continue').classList.contains('in')`, 6000, 'Continue 滑入');
     await sleep(600);
