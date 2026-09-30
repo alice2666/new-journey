@@ -20,6 +20,7 @@
 ## 测试约定
 
 - 验收脚本：`.workbuddy/tools/test.js`（CDP 直连系统 Edge，零安装）。用例可按名单独跑：`node test.js a3c`。
+- 启动兜底回归：`.workbuddy/tools/boot-check.js`（3 场景 14 项）。场景 C 用 `Page.addScriptToEvaluateOnNewDocument` 抹掉 `Promise` 模拟旧引擎，验证兜底面板触发且第一幕确实未渲染。
 - 断言前必须把视口钉成 **1200×896** 使 `s = 1`，否则量到的是缩放后的值。
 - 几何断言统一读**布局坐标**（`offsetParent` 链累加 `offsetLeft/offsetTop`），不要用 `getBoundingClientRect()`（会被动画 transform 污染）。
 - 判「有没有压倒物件」看**墨迹**不看行盒（用 canvas `measureText` 的 `actualBoundingBoxAscent`）。
@@ -34,6 +35,9 @@
 - **锁模型三层**：`busy`（演出，动画/打字期间屏蔽一切点击）/ `animLock`（贴纸落定·飞回 250ms，只锁贴纸）/ `placing`（待放置标志）。进入事件驱动的玩法循环前必须把 `busy` 置回 `false`。
 - **层叠模型**：场景用 wrapper（`#act1` auto / `#act2` 2 / `#act3` 3 / `#act4` 4 / `#blackout` 100 / slot 110），wrapper 内再按相对 z-index 排。`#blackout.guard` = 透明但仍拦截点击。
 - `#chat` 系列样式抽为 `.chat/.chat-frame/.chat-text` 公共类，**id 保留**（测试依赖）。
+- **浏览器最低要求**：Chrome 41+ / Edge 15+ / Firefox 44+（依赖 `Promise`、`classList`、`requestAnimationFrame`、`Element.closest`）。脚本保持 **ES5 写法**（不用 `let`/`const`、箭头函数、模板字面量、`?.`、`await`），兼容性风险只可能来自运行时能力 —— **新增运行时依赖时务必同步加进页面内的能力自检**。IE11 缺 `Promise` 与 `Element.closest`，必然黑屏。
+- **启动健壮性（v2.2 起）**：本页所有元素默认 `opacity:0`、靠脚本加 `.in` 才显示，所以「脚本没跑起来 = 全黑 + 点不动 + 零提示」，是最难排查的状态。页面内已建四层兜底（`<noscript>` / 引擎能力自检 / 6s 启动看门狗 / `main().catch` 与启动 `try` 的 `reportFailure()` 可见报错）。**改动第一幕路径时，务必确认不会引入新的静默失败点**；不要用裸 `console.error` 吞掉致命错误。
+- **排障顺序**（用户报「黑屏/点不动」时）：① 看新出现的兜底面板上的缺失能力与打开方式；② 核对资源路径大小写（Windows 本地不区分、换 HTTP 服务就 404）；③ 用 `_diag` 式探针开 **Network 域 `loadingFailed`**（`Log.entryAdded` 不给 URL）。
 
 ## Git
 
