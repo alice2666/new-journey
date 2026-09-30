@@ -820,13 +820,13 @@ const INK_TOP_FN = `(() => {
     assertEq('a3c 已用过的贴纸不会进入待放置态', (await njState()).placing === false ? 0 : 1, 0);
     assertEq('a3c 落定数量仍为 1', await placedCount(), 1);
 
-    // --- ④ 自由落点：换不同位置再贴 2 张，凑满 3 张 ---
-    await place('camera', 220, 300);
-    await place('drink', 480, 700);
+    // --- ④ 自由落点：换不同位置再贴 2 张，凑满 3 张（落点须让整张贴纸落在红框内） ---
+    await place('camera', 240, 340);
+    await place('drink', 440, 700);
     centers = await placedCenters();
     assertEq('a3c 三张贴纸数量', centers.length, 3, 0);
-    assertEq('a3c 第 2 张贴纸落点自由（220,300）', centers[1].cx * 1000 + centers[1].cy, 220300, 0.6);
-    assertEq('a3c 第 3 张贴纸落点自由（480,700）', centers[2].cx * 1000 + centers[2].cy, 480700, 0.6);
+    assertEq('a3c 第 2 张贴纸落点自由（240,340）', centers[1].cx * 1000 + centers[1].cy, 240340, 0.6);
+    assertEq('a3c 第 3 张贴纸落点自由（440,700）', centers[2].cx * 1000 + centers[2].cy, 440700, 0.6);
     assertEq('a3c 计数 = 3', (await njState()).count, 3);
 
     // --- ⑤ 贴纸数 ≥ 3 -> OK 转为可用（Q16） ---
@@ -849,13 +849,13 @@ const INK_TOP_FN = `(() => {
     assertTrue('a3c 该贴纸已恢复面板可点', !(await hasClass(paletteSel('flower'), 'used')));
     assertEq('a3c 面板置灰数量回到 3', await usedPalettes(), 3);
 
-    // 贴纸框右边缘外 1px 也属于「箱身之外」
+    // 中心仍在红框内（537 < 540），但整张贴纸右边缘 607 已压出框外 -> 属于「超出范围」（Q25）
     await click(paletteSel('flower'));
     await sleep(200);
     await clickCanvas(537, 500);
     await sleep(400);
-    assertEq('a3c 箱身右边界外 1px -> 不落定', await placedCount(), 3);
-    assertEq('a3c 箱身右边界外 1px -> 不计数', (await njState()).count, 3);
+    assertEq('a3c 中心在框内但贴纸压出框外 -> 不落定', await placedCount(), 3);
+    assertEq('a3c 中心在框内但贴纸压出框外 -> 不计数', (await njState()).count, 3);
 
     // --- ⑦ 待放置时点面板另一张 -> 切换目标（前一张飞回槽位） ---
     await click(paletteSel('love'));
@@ -869,7 +869,88 @@ const INK_TOP_FN = `(() => {
     await sleep(320);
     assertEq('a3c 切换目标后落定成功，共 4 张', await placedCount(), 4);
 
-    // --- ⑧ 缩放补偿专项：s = 0.75 下落点仍精确落在鼠标所指处 ---
+    // --- ⑧ 可显示范围（Q25）：整张贴纸必须完整落在红框内，任一边越界即飞回 ---
+    await click('#btn-reset');
+    await sleep(320);
+    assertEq('a3c Q25 起点干净（RESET 后 0 张）', await placedCount(), 0);
+
+    const DB = await evaluate(`window.__nj.dropBox()`);
+    const DC = await evaluate(`window.__nj.dropCenter()`);
+    assertEq('a3c Q25 红框左 = 146（用户红框实测换算）', DB.left, 146, 0);
+    assertEq('a3c Q25 红框右 = 540', DB.right, 540, 0);
+    assertEq('a3c Q25 红框上 = 259', DB.top, 259, 0);
+    assertEq('a3c Q25 红框下 = 793', DB.bottom, 793, 0);
+    assertEq('a3c Q25 中心可落点左 = 红框左 + 半个贴纸 71', DC.left, 217, 0.01);
+    assertEq('a3c Q25 中心可落点右 = 红框右 − 半个贴纸 71', DC.right, 469, 0.01);
+    assertEq('a3c Q25 中心可落点上 = 红框上 + 半个贴纸 59.5', DC.top, 318.5, 0.01);
+    assertEq('a3c Q25 中心可落点下 = 红框下 − 半个贴纸 59.5', DC.bottom, 733.5, 0.01);
+
+    // 核心回归 —— 这几个点的「贴纸中心」**都在红框内**（旧版「只判中心」会放行），
+    // 但整张贴纸会压出框外，按 Q25 必须飞回原位、不落定、不计数。
+    const OVERFLOW = [
+      [150, 500, '左边缘压出框外（79 < 146）'],
+      [536, 500, '右边缘压出框外（607 > 540）'],
+      [300, 265, '顶边压出框外（205.5 < 259）'],
+      [300, 785, '底边压出框外（844.5 > 793）'],
+      [216, 500, '中心差 1px 未达左侧下限 217'],
+      [470, 500, '中心差 1px 超出右侧上限 469'],
+      [300, 318, '中心差 0.5px 未达上限 318.5'],
+      [300, 734, '中心差 0.5px 超出下限 733.5'],
+    ];
+    for (const [px, py, why] of OVERFLOW) {
+      await click(paletteSel('bag'));
+      await sleep(200);
+      await clickCanvas(px, py);
+      await sleep(400);
+      assertEq(`a3c Q25 越界飞回·不落定（${why}）`, await placedCount(), 0);
+      assertEq(`a3c Q25 越界飞回·不计数（${why}）`, (await njState()).count, 0);
+      assertTrue(`a3c Q25 越界飞回·贴纸恢复面板可点（${why}）`,
+        !(await hasClass(paletteSel('bag'), 'used')));
+      assertEq(`a3c Q25 越界飞回·跟随层已清空（${why}）`, await cursorCount(), 0);
+    }
+
+    // 边界上/边界内 1px 必须**能**贴上（防止「收紧判据」收过头，把整块可贴区做废）
+    const EDGE = [
+      [217, 500, '左边缘恰好贴框（146）'],
+      [469, 500, '右边缘恰好贴框（540）'],
+      [300, 319, '顶边恰好贴框（259.5 ≥ 259）'],
+      [300, 733, '底边恰好贴框（792.5 ≤ 793）'],
+    ];
+    const EDGE_KEYS = ['camera', 'drink', 'flower', 'love'];
+    for (let i = 0; i < EDGE.length; i += 1) {
+      const [px, py, why] = EDGE[i];
+      await place(EDGE_KEYS[i], px, py);
+      const cc = await placedCenters();
+      assertEq(`a3c Q25 贴边可落定（${why}）`, cc.length, i + 1, 0);
+      assertEq(`a3c Q25 贴边落点精确 x（${why}）`, cc[i].cx, px, 0.6);
+      assertEq(`a3c Q25 贴边落点精确 y（${why}）`, cc[i].cy, py, 0.6);
+    }
+
+    // 落定贴纸的**实际外框**必须完整落在红框内（按布局坐标，不含 ±10° 旋转）
+    const outer = await evaluate(`(() => {
+      const box = window.__nj.dropBox();
+      return [].slice.call(document.querySelectorAll('#sticker-layer .placed')).map(function (el) {
+        const l = parseFloat(el.style.left), t = parseFloat(el.style.top);
+        const r = l + el.offsetWidth, b = t + el.offsetHeight;
+        return { l: l, r: r, t: t, b: b,
+                 ok: l >= box.left - 0.51 && r <= box.right + 0.51 &&
+                     t >= box.top - 0.51 && b <= box.bottom + 0.51 };
+      });
+    })()`);
+    assertEq('a3c Q25 落定数量 = 4', outer.length, 4, 0);
+    assertEq('a3c Q25 四张贴纸外框全部完整落在红框内',
+      outer.filter(function (o) { return !o.ok; }).length, 0, 0);
+    assertTrue('a3c Q25 最左外框 ≥ 146（没有一张压出左边）',
+      Math.min.apply(null, outer.map(function (o) { return o.l; })) >= 145.5);
+    assertTrue('a3c Q25 最右外框 ≤ 540（没有一张压出右边）',
+      Math.max.apply(null, outer.map(function (o) { return o.r; })) <= 540.5);
+    assertTrue('a3c Q25 最上外框 ≥ 259（没有一张压出上边）',
+      Math.min.apply(null, outer.map(function (o) { return o.t; })) >= 258.5);
+    assertTrue('a3c Q25 最下外框 ≤ 793（没有一张压出下边）',
+      Math.max.apply(null, outer.map(function (o) { return o.b; })) <= 793.5);
+    await shot('a3c-4-dropbox');
+
+    // --- ⑨ 缩放补偿专项：s = 0.75 下落点仍精确落在鼠标所指处 ---
     await cdp.send('Emulation.setDeviceMetricsOverride', { width: 900, height: 672, deviceScaleFactor: 1, mobile: false });
     await evaluate(`window.dispatchEvent(new Event('resize'))`);
     await sleep(350);

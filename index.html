@@ -562,10 +562,20 @@
   var TYPE_SPEED = 40;        // ms / 字
   var CLICK_COOLDOWN = 300;
 
-  /* ---- 第三幕贴纸玩法（自由落点 Q14 / Q24） ---- */
+  /* ---- 第三幕贴纸玩法（自由落点 Q14 / Q24 / Q25） ---- */
   var STICKER_W = 142;        // 贴纸素材原尺寸，与面板槽位完全等尺寸，不缩放
   var STICKER_H = 119;
-  var BODY = { left: 150, right: 536, top: 246, bottom: 779 };  // 箱身实测范围；判据是「点击点 = 贴纸中心」
+  /* 行李箱「可显示范围」（Q25）：由用户给定的红框实测换算而来（截图 819×619 → 画布 1200×896）。
+     判据是「**整张贴纸**必须完整落在这个框内」，任一边越界即「超出范围」→ 飞回原位不计数。
+     注意这与旧版「只判点击点（= 贴纸中心）」是两回事：旧版允许贴纸压出框外最多 71 / 59.5px。 */
+  var DROP_BOX = { left: 146, right: 540, top: 259, bottom: 793 };
+  /* 贴纸**中心**的可落点区间 = 红框四边各内缩半个贴纸 */
+  var DROP = {
+    left:   DROP_BOX.left   + STICKER_W / 2,
+    right:  DROP_BOX.right  - STICKER_W / 2,
+    top:    DROP_BOX.top    + STICKER_H / 2,
+    bottom: DROP_BOX.bottom - STICKER_H / 2
+  };
   var OK_THRESHOLD = 3;       // 箱身贴纸数 ≥ 3 时 btn-ok 可用（Q16）
   var RISE_MS = 200;          // 选中升起
   var FLY_MS = 250;           // 落定过渡 / 飞回取消
@@ -704,8 +714,11 @@
     return { x: (e.clientX - r.left) / s, y: (e.clientY - r.top) / s };
   }
 
+  /* 落点判定（Q25）：入参是「贴纸中心」的画布坐标。
+     必须整张贴纸（142×119 未旋转外框）完整落在 DROP_BOX 内才算有效 —— 所以这里比的是
+     内缩后的 DROP 区间。改判据时务必同时改跟随高亮（.on-body）与验收断言，三者同源。 */
   function inBody(x, y) {
-    return x >= BODY.left && x <= BODY.right && y >= BODY.top && y <= BODY.bottom;
+    return x >= DROP.left && x <= DROP.right && y >= DROP.top && y <= DROP.bottom;
   }
 
   /* ================= 音效（3 实例轮询，允许重叠） ================= */
@@ -1205,7 +1218,9 @@
   window.__nj = {
     setRotation: function (deg) { rotOverride = deg; },
     clearRotation: function () { rotOverride = null; },
-    body: function () { return BODY; },
+    dropBox: function () { return DROP_BOX; },      // 「可显示范围」红框（画布坐标）
+    dropCenter: function () { return DROP; },       // 由红框内缩得到的贴纸中心可落点区间
+    body: function () { return DROP_BOX; },         // 旧名，语义等同 dropBox
     state: function () {
       return {
         count: stickerCount, okReady: okReady, placing: !!placing, act3Done: act3Done,
