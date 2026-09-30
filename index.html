@@ -230,7 +230,7 @@
   }
   #sticker-frame.in { transform: translateX(0); }
 
-  /* 调色板 11 张贴纸：142x119，与面板槽位等尺寸，直接对位（坐标写在 HTML 内联样式） */
+  /* 调色板 12 张贴纸：142x119，与面板槽位等尺寸，直接对位（坐标写在 HTML 内联样式） */
   .palette {
     position: absolute; width: 142px; height: 119px;
     opacity: 0;
@@ -423,7 +423,7 @@
       </div>
       <img id="btn-go3" src="assets/screen2/btn-go.png" alt="GO">
 
-      <!-- 贴纸面板 + 11 张调色板贴纸（槽位画布坐标：列 690/847/1004 × 行 91/225/361/495，第 4 行第 3 格留空） -->
+      <!-- 贴纸面板 + 12 张调色板贴纸（槽位画布坐标：列 690/847/1004 × 行 91/225/361/495，12 格填满） -->
       <div id="sticker-panel">
         <img id="sticker-frame" src="assets/screen3/sticker-frame.png" alt="">
         <img class="palette" data-sticker="bag"      style="left:690px;top:91px"  src="assets/screen3/bag.png"      alt="">
@@ -437,6 +437,7 @@
         <img class="palette" data-sticker="rainboat" style="left:1004px;top:361px" src="assets/screen3/rainboat.png" alt="">
         <img class="palette" data-sticker="travel"   style="left:690px;top:495px" src="assets/screen3/travel.png"   alt="">
         <img class="palette" data-sticker="tree"     style="left:847px;top:495px" src="assets/screen3/tree.png"     alt="">
+        <img class="palette" data-sticker="earth"    style="left:1004px;top:495px" src="assets/screen3/earth.png"   alt="">
       </div>
       <img id="btn-reset" src="assets/screen3/btn-reset.png" alt="RESET">
       <img id="btn-ok" src="assets/screen3/btn-ok.png" alt="OK">
@@ -569,7 +570,7 @@
   var RISE_MS = 200;          // 选中升起
   var FLY_MS = 250;           // 落定过渡 / 飞回取消
   var STICKER_FADE_MS = 400;
-  var STICKER_STAGGER_MS = 40;  // 11 张贴纸错峰浮现间隔（Q23）
+  var STICKER_STAGGER_MS = 40;  // 12 张贴纸错峰浮现间隔（Q23）
 
   /* 首屏只加载第一、二幕（3.8MB）；
      三、四幕（合计 6.4MB，视频独占 4.54MB）留到第二幕末尾并行预加载 */
@@ -625,7 +626,7 @@
 
   var blackout   = document.getElementById('blackout');
 
-  /* 调色板 11 张贴纸：槽位坐标的唯一来源是 HTML 的内联样式，避免两处各写一份 */
+  /* 调色板 12 张贴纸：槽位坐标的唯一来源是 HTML 的内联样式，避免两处各写一份 */
   var palettes = [].map.call(document.querySelectorAll('#sticker-panel .palette'), function (el) {
     return {
       el: el,
@@ -900,7 +901,7 @@
     else { btnOk.classList.add('dim'); btnOk.classList.remove('ready'); }
   }
 
-  // RESET：清空箱身全部贴纸 + 调色板 11 张全部恢复 + 计数归零 + 取消待放置
+  // RESET：清空箱身全部贴纸 + 调色板 12 张全部恢复 + 计数归零 + 取消待放置
   function resetAll() {
     playSound();
     cancelPlacing(true);
@@ -1043,7 +1044,7 @@
     return Promise.resolve()
       .then(function () { return anim(600, function () { stickerFrame.classList.add('in'); }); })
       .then(function () {
-        // 11 张贴纸逐个错峰淡入（Q23）
+        // 12 张贴纸逐个错峰淡入（Q23）
         return new Promise(function (resolve) {
           palettes.forEach(function (it, i) {
             setTimeout(function () { it.el.classList.add('in'); }, i * STICKER_STAGGER_MS);

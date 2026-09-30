@@ -709,8 +709,8 @@ const INK_TOP_FN = `(() => {
     await waitFor(`document.getElementById('btn-ok').classList.contains('in')`, 12000, '按钮滑入');
     await sleep(300);
     await shot('a3-3-panel');
-    assertEq('a3 面板入场完成后 11 张贴纸全部可见',
-      await evaluate(`document.querySelectorAll('#sticker-panel .palette.in').length`), 11, 0);
+    assertEq('a3 面板入场完成后 12 张贴纸全部可见',
+      await evaluate(`document.querySelectorAll('#sticker-panel .palette.in').length`), 12, 0);
   }
 
   /* ================= 用例 a3b：第三幕几何（面板 / 槽位 / 按钮） ================= */
@@ -726,26 +726,41 @@ const INK_TOP_FN = `(() => {
     assertEq('a3b 面板 高 = 630', fr.height, 630, 0);
     assertEq('a3b 面板 下边缘 = 675', fr.top + fr.height, 675, 0);
 
-    // --- 11 张贴纸逐格对位（列 690/847/1004 × 行 91/225/361/495，第 12 格留空） ---
+    // --- 12 张贴纸逐格对位（列 690/847/1004 × 行 91/225/361/495，12 格填满不留空） ---
     const EXP = [
       ['bag', 690, 91], ['camera', 847, 91], ['drink', 1004, 91],
       ['flower', 690, 225], ['love', 847, 225], ['mountant', 1004, 225],
       ['passport', 690, 361], ['planet', 847, 361], ['rainboat', 1004, 361],
-      ['travel', 690, 495], ['tree', 847, 495],
+      ['travel', 690, 495], ['tree', 847, 495], ['earth', 1004, 495],
     ];
-    assertEq('a3b 调色板贴纸数量 = 11', await evaluate(`document.querySelectorAll('#sticker-panel .palette').length`), 11, 0);
+    assertEq('a3b 调色板贴纸数量 = 12（3×4 槽位全部填满）',
+      await evaluate(`document.querySelectorAll('#sticker-panel .palette').length`), 12, 0);
     for (const [key, x, y] of EXP) {
       const b = await box(paletteSel(key));
       assertEq(`a3b ${key} 槽位 left=${x} / top=${y}`, b.left * 100000 + b.top, x * 100000 + y, 0);
       assertEq(`a3b ${key} 尺寸 142x119`, b.width * 1000 + b.height, 142119, 0);
       assertEq(`a3b ${key} 可见`, await effOpacity(paletteSel(key)), 1, 0.01);
     }
-    // 第 4 行第 3 格（1004, 495）必须留空
-    assertEq('a3b 第 12 格（1004,495）留空无贴纸',
+    // 第 4 行第 3 格（1004,495）此前是空的 —— 现由 earth.png 占据，且必须真的解码出像素
+    assertTrue('a3b 第 4 行第 3 格现由 earth.png 占据（此前为空）',
       await evaluate(`(() => {
-        const hit = [].filter.call(document.querySelectorAll('#sticker-panel .palette'), (el) =>
-          parseFloat(el.style.left) === 1004 && parseFloat(el.style.top) === 495);
-        return hit.length;
+        const el = document.querySelector('#sticker-panel .palette[data-sticker="earth"]');
+        return !!el && parseFloat(el.style.left) === 1004 && parseFloat(el.style.top) === 495
+          && /assets\\/screen3\\/earth\\.png$/.test(el.getAttribute('src'));
+      })()`));
+    assertEq('a3b earth.png 已成功解码（原始宽 142）',
+      await evaluate(`document.querySelector('#sticker-panel .palette[data-sticker="earth"]').naturalWidth`), 142, 0);
+    // 12 个槽位一格不差、也不重复（防止「补一张」变成「挤掉一张」或坐标写重）
+    assertEq('a3b 12 个槽位恰好被 12 张贴纸占满（无空缺、无重复坐标）',
+      await evaluate(`(() => {
+        const want = [];
+        [91, 225, 361, 495].forEach(function (t) { [690, 847, 1004].forEach(function (l) { want.push(l + ',' + t); }); });
+        const got = [].map.call(document.querySelectorAll('#sticker-panel .palette'),
+          function (el) { return parseFloat(el.style.left) + ',' + parseFloat(el.style.top); });
+        if (got.length !== want.length) return -1;
+        const miss = want.filter(function (w) { return got.indexOf(w) < 0; });
+        const dup = got.filter(function (g, i) { return got.indexOf(g) !== i; });
+        return miss.length * 100 + dup.length;
       })()`), 0, 0);
 
     // --- 按钮：同一水平线 top 714（距底 85），OK 距右 25，RESET 距 OK 70 ---
@@ -866,7 +881,7 @@ const INK_TOP_FN = `(() => {
     await sleep(300);
     assertEq('a3c RESET 后箱身贴纸全部清除', await placedCount(), 0);
     assertEq('a3c RESET 后计数归零', (await njState()).count, 0);
-    assertEq('a3c RESET 后调色板 11 张全部恢复', await usedPalettes(), 0);
+    assertEq('a3c RESET 后调色板 12 张全部恢复', await usedPalettes(), 0);
     assertTrue('a3c RESET 后 OK 回到置灰态', await hasClass('#btn-ok', 'dim'));
     assertTrue('a3c RESET 后 OK 不可点击', (await box('#btn-ok')).pointerEvents === 'none');
 
