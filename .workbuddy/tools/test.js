@@ -5,6 +5,7 @@
  *   node .workbuddy/tools/test.js p1       只跑「问题1：台词文本位置」
  *   node .workbuddy/tools/test.js p2       只跑「问题2：chat 消失 -> hand 出现」
  *   node .workbuddy/tools/test.js flow     只跑「第一、二幕全流程回归」
+ *   node .workbuddy/tools/test.js gate     场景门控（未激活幕不得盖住当前幕）
  *   node .workbuddy/tools/test.js a3       第三幕：视频 -> 定格 -> 第三句 -> 对话框消失
  *   node .workbuddy/tools/test.js a3b      第三幕：面板 / 槽位 / 按钮几何
  *   node .workbuddy/tools/test.js a3c      第三幕：自由落点玩法 + 缩放补偿专项
@@ -147,7 +148,7 @@ const INK_TOP_FN = `(() => {
 /* ================= 主流程 ================= */
 (async () => {
   const which = process.argv.slice(2).filter((a) => !a.startsWith('-'));
-  const cases = which.length ? which : ['p1', 'p2', 'flow', 'a3', 'a3b', 'a3c', 'a4', 'full2'];
+  const cases = which.length ? which : ['gate', 'p1', 'p2', 'flow', 'a3', 'a3b', 'a3c', 'a4', 'full2'];
 
   const child = spawn(EDGE, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -267,6 +268,58 @@ const INK_TOP_FN = `(() => {
     await waitFor(`document.getElementById('btn-go').classList.contains('in')`, 25000, '第 2 句打完');
     await sleep(400);
   };
+
+  /* ================= 用例 gate：场景门控 =================
+     守的是一类「既有断言全绿、画面却是错的」的盲区：未激活幕的元素盖住了当前幕。
+
+     成因（真实发生过）：#bg-room-suitcase 是「常驻可见」的定格图 —— 它不像 #act3-video
+     那样自带 opacity:0，本身也没有任何淡入逻辑；而它所在的 #act3 的 z-index(3) 高于
+     #act2(2) 与 #act1(auto)。所以 #act3 容器一旦漏写 opacity:0 门控，这张定格图就会
+     从页面载入的第一帧起盖在第一、二幕之上，表现是：
+       「一打开就是行李箱的房间、看不到开始界面、画面怎么都不动」。
+     而 p1/p2/flow 断言的是各元素的类名、坐标、单个元素 opacity —— 全部仍然正确，
+     所以一条都不会失败。本用例改为断言「整幕容器」的有效可见性。 */
+  async function caseGate() {
+    const SCENE_SNAP = `(() => {
+      const eff = (el) => { let o = 1, n = el; while (n && n !== document.documentElement) { o *= parseFloat(getComputedStyle(n).opacity); n = n.parentElement; } return +o.toFixed(3); };
+      const ids = ['act1', 'act2', 'act3', 'act4', 'bg-room-suitcase', 'shadow'];
+      const out = {};
+      ids.forEach((id) => { const el = document.getElementById(id); if (el) out[id] = eff(el); });
+      return JSON.stringify(out);
+    })()`;
+    const snap = async () => JSON.parse(await evaluate(SCENE_SNAP));
+
+    // ① 载入后一次都没点击：只允许第一幕可见
+    const s1 = await snap();
+    assertEq('gate 载入时第一幕可见', s1.act1, 1, 0.01);
+    assertEq('gate 载入时第二幕不可见', s1.act2, 0, 0.01);
+    assertEq('gate 载入时第三幕整幕不可见（漏门控就会盖住第一幕）', s1.act3, 0, 0.01);
+    assertEq('gate 载入时第四幕整幕不可见', s1.act4, 0, 0.01);
+    assertEq('gate 载入时第三幕定格图不可见（它是常驻可见元素，最易漏）', s1['bg-room-suitcase'], 0, 0.01);
+    await shot('gate-1-act1-start');
+
+    // ② 第二幕进行中：第一幕退场、第三幕仍不可见
+    await toAct2SecondLine();
+    const s2 = await snap();
+    assertEq('gate 第二幕时第一幕已退场', s2.act1, 0, 0.01);
+    assertEq('gate 第二幕时第二幕可见', s2.act2, 1, 0.01);
+    assertEq('gate 第二幕时第三幕仍不可见', s2.act3, 0, 0.01);
+    assertEq('gate 第二幕时第四幕仍不可见', s2.act4, 0, 0.01);
+    await shot('gate-2-act2-room');
+
+    // ③ 接着第二幕继续推进到第三幕激活：整幕转为可见（防止「修反了」变成永远不显示）
+    //    注意不能直接调 toAct3() —— 它内部会重跑 toAct2SecondLine()，
+    //    而此刻第二句的 GO 已经点过了，会一直等不到第二个 GO。
+    await clickAndWaitHide('#btn-go');
+    await waitFor(`document.getElementById('hand').classList.contains('in')`, 6000, 'hand 出现');
+    await sleep(500);
+    await click('#suitcase');
+    await waitFor(`document.getElementById('blackout').classList.contains('in')`, 10000, '第二幕黑幕');
+    await waitFor(`document.getElementById('act3').classList.contains('active')`, 15000, '第三幕激活');
+    const s3 = await snap();
+    assertEq('gate 第三幕激活后整幕可见', s3.act3, 1, 0.01);
+    assertEq('gate 第三幕时定格图可见', s3['bg-room-suitcase'], 1, 0.01);
+  }
 
   /* ================= 用例 p1：台词文本位置 =================
      需求：台词（2-3 行）整体下移 20px，且「只能在浅蓝色底板上，不能压倒其他物件」。
@@ -941,13 +994,14 @@ const INK_TOP_FN = `(() => {
   }
 
   const CASES = {
+    gate: caseGate,
     p1: caseP1, p2: caseP2, flow: caseFlow,
     a3: caseA3, a3b: caseA3b, a3c: caseA3c, a4: caseA4, full2: caseFull2,
   };
 
   for (const name of cases) {
     console.log('\n=== 用例 ' + name + ' ===');
-    if (!CASES[name]) { fail('未知用例 ' + name, '可选: p1 / p2 / flow / a3 / a3b / a3c / a4 / full2'); continue; }
+    if (!CASES[name]) { fail('未知用例 ' + name, '可选: gate / p1 / p2 / flow / a3 / a3b / a3c / a4 / full2'); continue; }
     try {
       await reload();
       await CASES[name]();
