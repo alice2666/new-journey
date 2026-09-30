@@ -19,10 +19,21 @@
 
 ## 测试约定
 
-- 验收脚本：`.workbuddy/tools/test.js`（CDP 直连系统 Edge，零安装）。
+- 验收脚本：`.workbuddy/tools/test.js`（CDP 直连系统 Edge，零安装）。用例可按名单独跑：`node test.js a3c`。
 - 断言前必须把视口钉成 **1200×896** 使 `s = 1`，否则量到的是缩放后的值。
 - 几何断言统一读**布局坐标**（`offsetParent` 链累加 `offsetLeft/offsetTop`），不要用 `getBoundingClientRect()`（会被动画 transform 污染）。
 - 判「有没有压倒物件」看**墨迹**不看行盒（用 canvas `measureText` 的 `actualBoundingBoxAscent`）。
+- **等应用内的锁、不要猜 sleep**：入场类名 `.in` 出现的瞬间动画才开始、`busy` 锁未释放，此时点击会被吞。用 `waitFor(window.__nj.state().busy === false)`。
+- 页面暴露只读调试钩子 `window.__nj`（`setRotation` / `body` / `state()`）供测试使用，对产品表现零影响；`state()` 含 `count/okReady/placing/act3Done/busy/animLock`。
+- 用 CDP 派发鼠标事件时，画布坐标要换算成视口坐标（`rect.left + cx * s`）再发三连事件。
+- 像素级结论（素材是否半透明等）用页面内 canvas + `getImageData` 断言，需要 `--allow-file-access-from-files`。
+
+## 实现约定
+
+- **分幕预加载**：首屏只加载第一、二幕；`<video>` 的 `src` 由 JS 在幕间注入（HTML 用 `preload="none"` 且不带 src），避免 4.54MB 视频拖慢开场。
+- **锁模型三层**：`busy`（演出，动画/打字期间屏蔽一切点击）/ `animLock`（贴纸落定·飞回 250ms，只锁贴纸）/ `placing`（待放置标志）。进入事件驱动的玩法循环前必须把 `busy` 置回 `false`。
+- **层叠模型**：场景用 wrapper（`#act1` auto / `#act2` 2 / `#act3` 3 / `#act4` 4 / `#blackout` 100 / slot 110），wrapper 内再按相对 z-index 排。`#blackout.guard` = 透明但仍拦截点击。
+- `#chat` 系列样式抽为 `.chat/.chat-frame/.chat-text` 公共类，**id 保留**（测试依赖）。
 
 ## Git
 
