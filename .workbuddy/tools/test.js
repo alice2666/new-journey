@@ -1599,6 +1599,8 @@ const INK_TOP_FN = `(() => {
 
     // 第五幕户外定格图淡入（本轮起不再播视频）
     await waitFor(`window.__nj.state().act5.outdoorIn === true`, 20000, '户外定格图淡入');
+    // 类名加上只是「开始淡入」，要等过渡真正走完再断言 opacity
+    await waitFor(`+getComputedStyle(document.getElementById('act5-outdoor')).opacity === 1`, 4000, '户外定格图淡入完成');
     assertEq('full3 第五幕户外定格图显示中', await effOpacity('#act5-outdoor'), 1, 0.02);
     assertTrue('full3 第五幕 video 未播放（静帧取代视频）',
       await evaluate(`document.getElementById('act5-video').currentTime === 0`));
