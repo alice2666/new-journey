@@ -382,10 +382,12 @@
   #btn-go5a.in:active, #btn-go5b.in:active { transform: scale(.92); }
 
   /* 地上的纸片：距右 290 / 距底 120（Q36 已定案，按图片外接框 195x123 计）
-     left = 1200 - 290 - 195 = 715；top = 896 - 120 - 123 = 653
+     原始值 left 715 / top 653；本轮按用户要求整体上移 60px、左移 10px：
+       left = 715 - 10  = 705（距右 300，距底 180）
+       top  = 653 - 60  = 593
      B4 出现时淡入但不可点（对话正在进行）；B7 引导手出现后才变可点。 */
   #btn-papers {
-    position: absolute; left: 715px; top: 653px; width: 195px; height: 123px;
+    position: absolute; left: 705px; top: 593px; width: 195px; height: 123px;
     z-index: 40;
     opacity: 0;
     transition: opacity .4s ease-out, transform .15s ease-out, filter .2s ease-out;
@@ -399,14 +401,14 @@
 
   /* 第五幕引导手：复用 screen2/hand.png，指尖(transform-origin 7% 0%)指向纸片。
      实测 hand.png 的指尖像素 = (11, 0)，即 7% × 165 ≈ 11.55，与 transform-origin 一致。
-     纸片外接框 = left 715 / top 653 / 195x123，中心 = (812.5, 714.5)。
+     纸片外接框 = left 705 / top 593 / 195x123，中心 = (802.5, 654.5)。
      指尖画布坐标 = (left + 11.55, top)：
-       取 left = 801 -> 指尖 x ≈ 812.6（对准纸片横向中心，与既有断言一致）
-       取 top  = 596 -> 指尖 y = 596，停在纸片上沿（653）之上约 57px，
+       取 left = 791 -> 指尖 x ≈ 802.6（对准纸片横向中心）
+       取 top  = 536 -> 指尖 y = 536，停在纸片上沿（593）之上约 57px，
                         是「从上方指向纸片」的姿态，不遮住纸片本身。
-     该值属目测校准项（需求 §8.7），实现后按截图微调。 */
+     注：纸片本轮上移 60 / 左移 10，引导手同步 -10 / -60，保持原有相对姿态。 */
   #hand5 {
-    position: absolute; left: 801px; top: 596px;
+    position: absolute; left: 791px; top: 536px;
     width: 165px; height: 161px;
     z-index: 20;
     opacity: 0;

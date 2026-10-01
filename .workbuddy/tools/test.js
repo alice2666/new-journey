@@ -1442,11 +1442,13 @@ const INK_TOP_FN = `(() => {
     assertEq('a5 室内界面即最终界面：纸片在、无第三张过渡图',
       await effOpacity('#act5'), 1, 0.01);
     const p = await box('#btn-papers');
-    assertEq('a5 纸片 左边缘 = 715（距右 290）', p.left, 715, 0);
-    assertEq('a5 纸片 距画面右 = 290', p.fromRight, 290, 0);
-    assertEq('a5 纸片 顶边 = 653（距底 120）', p.top, 653, 0);
-    assertEq('a5 纸片 底边距画面底 = 120', p.fromBottom, 120, 0);
+    assertEq('a5 纸片 左边缘 = 705（原 715 左移 10）', p.left, 705, 0);
+    assertEq('a5 纸片 距画面右 = 300（原 290 左移 10）', p.fromRight, 300, 0);
+    assertEq('a5 纸片 顶边 = 593（原 653 上移 60）', p.top, 593, 0);
+    assertEq('a5 纸片 底边距画面底 = 180（原 120 上移 60）', p.fromBottom, 180, 0);
     assertEq('a5 纸片 尺寸 195x123（热区 = 整张外框）', p.width * 1000 + p.height, 195123, 0);
+    assertEq('a5 纸片位移符合用户要求：Δx = -10', p.left - 715, -10, 0.001);
+    assertEq('a5 纸片位移符合用户要求：Δy = -60', p.top - 653, -60, 0.001);
     assertTrue('a5 纸片此刻可见但尚不可点（对话进行中，Q39）',
       (await njState()).act5.papersIn === true && (await njState()).act5.papersClickable === false);
     assertTrue('a5 纸片图片已成功解码（原始宽 195）',
@@ -1508,6 +1510,20 @@ const INK_TOP_FN = `(() => {
         const hx = h.offsetLeft + 0.07 * h.offsetWidth;   // transform-origin: 7% 0%
         return hx >= p.offsetLeft && hx <= p.offsetLeft + p.offsetWidth;
       })()`));
+    // 纸片本轮上移 60 / 左移 10，引导手必须同步跟随（否则指尖会指向旧位置）
+    assertEq('a5b 引导手 左边缘 = 791（随纸片同步左移 10）', (await box('#hand5')).left, 791, 0);
+    assertEq('a5b 引导手 顶边 = 536（随纸片同步上移 60）', (await box('#hand5')).top, 536, 0);
+    assertEq('a5b 指尖 x 对准纸片横向中心 802.5',
+      await evaluate(`(() => {
+        const h = document.getElementById('hand5'), p = document.getElementById('btn-papers');
+        const hx = h.offsetLeft + 0.07 * h.offsetWidth;
+        return +(hx - (p.offsetLeft + p.offsetWidth / 2)).toFixed(1);
+      })()`), 0.1, 0.6);
+    assertEq('a5b 指尖 y 停在纸片上沿之上 57px（俯指姿态，不遮纸片）',
+      await evaluate(`(() => {
+        const h = document.getElementById('hand5'), p = document.getElementById('btn-papers');
+        return p.offsetTop - h.offsetTop;
+      })()`), 57, 0.5);
     assertTrue('a5b 此刻唯一可点目标 = 纸片（cursor:pointer）',
       (await box('#btn-papers')).pointerEvents === 'auto');
     assertTrue('a5b 纸片本身仍可见（引导阶段不隐藏，Q38）',
