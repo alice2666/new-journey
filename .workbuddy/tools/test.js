@@ -1707,7 +1707,11 @@ const INK_TOP_FN = `(() => {
     await shot('full2-2-goal');
     await click('#continue');
     await waitFor(`document.getElementById('blackout').classList.contains('in')`, 6000, '全黑');
-    await sleep(900);
+    /* ⚠️ v2.15：黑幕入场由 700 ms 改为 400 ms（.fast），淡完即进入第五幕 B1 的
+       `sleep(500)`，随后就开始撤黑幕淡入户外定格图。故不能再固定 sleep(900) 取「全黑帧」，
+       必须等黑幕真正到顶（opacity === 1）后立刻取帧。 */
+    await waitFor(`+getComputedStyle(document.getElementById('blackout')).opacity === 1`, 4000, '黑幕到顶');
+    await sleep(120);   // 仍在 500 ms 停留窗口内
     await shot('full2-3-black');
     assertEq('full2 终态纯黑', await effOpacity('#blackout'), 1, 0.01);
     assertTrue('full2 全流程无控制台报错（末段）', errors.length === 0, errors.join(' | '));
