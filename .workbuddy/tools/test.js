@@ -10,6 +10,8 @@
  *   node .workbuddy/tools/test.js a3b      第三幕：面板 / 槽位 / 按钮几何
  *   node .workbuddy/tools/test.js a3c      第三幕：自由落点玩法 + 缩放补偿专项
  *   node .workbuddy/tools/test.js a4       第四幕：蒙黑 -> Goal（从上到下快速落下）-> Continue -> 全黑
+ *   node .workbuddy/tools/test.js bgm      背景音乐：点击 START 起播 -> 跨幕连续 -> 点击 Continue 停止
+ *   node .workbuddy/tools/test.js bgm2     BGM 缺失时不得阻塞开场（屏蔽音乐资源后重跑）
  *   node .workbuddy/tools/test.js full2    第一 ~ 第四幕全流程（真实播放视频）
  *
  * 退出码：0 = 全部通过，1 = 存在失败
@@ -148,7 +150,7 @@ const INK_TOP_FN = `(() => {
 /* ================= 主流程 ================= */
 (async () => {
   const which = process.argv.slice(2).filter((a) => !a.startsWith('-'));
-  const cases = which.length ? which : ['gate', 'p1', 'p2', 'flow', 'a3', 'a3b', 'a3c', 'a4', 'full2'];
+  const cases = which.length ? which : ['gate', 'p1', 'p2', 'flow', 'a3', 'a3b', 'a3c', 'a4', 'bgm', 'bgm2', 'full2'];
 
   const child = spawn(EDGE, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -980,6 +982,173 @@ const INK_TOP_FN = `(() => {
   }
 
   /* ================= 用例 a4：第四幕目标达成 ================= */
+  /* ================= 用例 bgm：背景音乐（需求 §3.5 / Q27–Q30） =================
+     守的核心是「起止点精确」与「跨幕不重启」——
+     起播必须恰好等于点击 START（之前全程静音），停止必须恰好等于点击 Continue。
+
+     ⚠️ 测试启动参数带了 --autoplay-policy=no-user-gesture-required，
+     所以 bgm.play() 在本环境一定成功；这恰好让我们能干净地验证「起止逻辑」本身，
+     而不被自动播放策略的偶发性干扰。真实浏览器下起播点也是真实用户手势，天然满足。
+     另外：跳过快进视频用的是 currentTime 赋值，不会触碰 bgm。 */
+  async function caseBgm() {
+    const bgmOf = async () => (await njState()).bgm;
+
+    /* ---- 1. 页面加载后、点击 START 之前：必须全程静音 ---- */
+    await waitFor(`document.getElementById('btn-start').classList.contains('in')`, 20000, 'btn-start 出现');
+    await sleep(700);
+    const b0 = await bgmOf();
+    assertTrue('bgm 起始静音：点击 START 之前 BGM 未播放（paused = true）', b0.paused === true,
+      'paused = ' + b0.paused);
+    assertTrue('bgm 起始静音：尚未请求播放（wanted = false）', b0.wanted === false,
+      'wanted = ' + b0.wanted);
+    assertTrue('bgm 加载独立：BGM 不阻塞开场（第一幕已渲染）',
+      (await njState()).booted === true);
+    await shot('bgm-0-silent');
+
+    /* ---- 2. 参数：音量 / 循环 / 素材 —— 读 Audio 真实属性，不看代码 ---- */
+    assertEq('bgm 音量 = 0.35（Q27）', b0.volume, 0.35, 0.001);
+    assertEq('bgm 不劫持点击音效：音效音量仍为 0.85（Q27）',
+      (await njState()).soundVolume, 0.85, 0.001);
+    assertTrue('bgm 循环 = true（Q28）', b0.loop === true, 'loop = ' + b0.loop);
+    assertTrue('bgm 素材指向 music-walker-s.wav',
+      String(b0.src).indexOf('music-walker-s.wav') > -1, 'src = ' + b0.src);
+
+    /* ---- 3. 点击 START 的瞬间起播 ---- */
+    await click('#btn-start');
+    await waitFor(`window.__nj.state().bgm.wanted === true`, 4000, 'BGM 起播请求');
+    await sleep(300);
+    const b1 = await bgmOf();
+    assertTrue('bgm 起播：点击 START 后 wanted = true', b1.wanted === true);
+    assertTrue('bgm 起播：点击 START 后确实在播放（paused = false）', b1.paused === false,
+      'paused = ' + b1.paused + ' / ready = ' + b1.ready + ' / src = ' + b1.src);
+    await shot('bgm-1-playing');
+
+    /* ---- 4. 跨幕连续（Q29）：第二幕期间 currentTime 只增不减，不重启 ---- */
+    await waitFor(`document.getElementById('chat').classList.contains('in')`, 10000, 'chat 滑入');
+    await sleep(500);
+    const b2 = await bgmOf();
+    assertTrue('bgm 跨幕连续：进入第二幕后仍在播放', b2.paused === false);
+    assertTrue('bgm 跨幕连续：currentTime 向前推进（未重启回零）', b2.currentTime > b1.currentTime,
+      b1.currentTime.toFixed(2) + ' -> ' + b2.currentTime.toFixed(2));
+
+    /* ---- 5. 跨幕连续（Q29）：第二幕收尾 -> 第三幕整幕，全程不被触碰 ----
+       这里不能复用 toAct3Panel()：它内部会从 toAct2FirstLine() 重头走，而本用例此刻
+       已经停在第二幕，重复等 START 会死等。故按同一套步骤手工推进（与 toAct3Panel 等价）。 */
+    await waitFor(`document.getElementById('btn-go').classList.contains('in')`, 25000, '第 1 句打完');
+    await sleep(400);
+    await clickAndWaitHide('#btn-go');
+    await waitFor(`document.getElementById('suitcase').classList.contains('in')`, 10000, 'suitcase 出现');
+    await waitFor(`document.getElementById('btn-go').classList.contains('in')`, 25000, '第 2 句打完');
+    await sleep(400);
+    await click('#btn-go');
+    await waitFor(`document.getElementById('hand').classList.contains('in')`, 6000, 'hand');
+    await sleep(500);
+    await click('#suitcase');
+    await waitFor(`document.getElementById('blackout').classList.contains('in')`, 10000, '第二幕黑幕');
+    await waitFor(`document.getElementById('act3').classList.contains('active')`, 15000, '第三幕激活');
+    await waitFor(`!document.getElementById('blackout').classList.contains('in')`, 20000, '黑幕淡出露出视频');
+    await evaluate(`(() => {
+      const e = document.getElementById('act3-video');
+      if (e.readyState >= 1 && e.duration > 0) e.currentTime = Math.max(0, e.duration - 0.4);
+    })()`);
+    await waitFor(`document.getElementById('chat3').classList.contains('in')`, 20000, 'chat3 滑入');
+    await waitFor(`document.getElementById('btn-go3').classList.contains('in')`, 25000, '第三句打完');
+    await sleep(300);
+    await click('#btn-go3');
+    await waitFor(`document.getElementById('sticker-frame').classList.contains('in')`, 10000, '面板滑入');
+    await waitFor(`document.getElementById('btn-ok').classList.contains('in')`, 12000, '按钮滑入');
+    await waitFor(`window.__nj.state().busy === false`, 5000, '演出锁释放');
+    await sleep(150);
+
+    const b3 = await bgmOf();
+    assertTrue('bgm 跨幕连续：第二 -> 第三幕整段转场期间仍在播放', b3.paused === false);
+    assertTrue('bgm 跨幕连续：第二 -> 第三幕期间 currentTime 继续推进（未重启）',
+      b3.currentTime > b2.currentTime,
+      b2.currentTime.toFixed(2) + ' -> ' + b3.currentTime.toFixed(2));
+    assertEq('bgm 跨幕连续：音量在幕间未被改动（仍为 0.35）', b3.volume, 0.35, 0.001);
+    assertTrue('bgm 跨幕连续：第三幕玩法期间仍在播放（贴纸交互不打断音乐）', b3.paused === false);
+
+    /* ---- 6. 第四幕蒙黑（goal01 / Continue 期间）BGM 仍在响 ---- */
+    await evaluate(`window.__nj.setRotation(0)`);
+    await place('bag', 250, 400);
+    await place('camera', 400, 550);
+    await place('drink', 300, 680);
+    // 贴满 3 张后 OK 才可用；且按钮的「可用态」与点击监听有时序差，必须等状态就绪再点
+    await waitFor(`window.__nj.state().okReady === true`, 4000, 'OK 可用');
+    await sleep(200);
+    await click('#btn-ok');
+    await waitFor(`document.getElementById('continue').classList.contains('in')`, 12000, 'Continue 滑入');
+    await sleep(600);
+    const b4 = await bgmOf();
+    assertTrue('bgm 跨幕连续：第四幕 Continue 出现后、点击前 BGM 仍在响', b4.paused === false,
+      'paused = ' + b4.paused);
+    // 只断言 paused 不够 —— 「跨幕重启」会让 currentTime 回零后又正常继续播放，
+    // paused 全程都是 false，光看播放状态察觉不到。必须断言时间轴没有倒退。
+    assertTrue('bgm 跨幕连续：第四幕期间 currentTime 继续推进（未重启回零）',
+      b4.currentTime > b3.currentTime,
+      b3.currentTime.toFixed(2) + ' -> ' + b4.currentTime.toFixed(2));
+    await shot('bgm-2-before-continue');
+
+    /* ---- 7. 点击 Continue 的瞬间停止（全片唯一停止点） ---- */
+    await click('#continue');
+    await waitFor(`window.__nj.state().bgm.wanted === false`, 4000, 'BGM 停止请求');
+    await sleep(300);
+    const b5 = await bgmOf();
+    assertTrue('bgm 停止：点击 Continue 后 wanted = false', b5.wanted === false);
+    assertTrue('bgm 停止：点击 Continue 后确实已暂停（paused = true）', b5.paused === true,
+      'paused = ' + b5.paused);
+    assertEq('bgm 停止：停止后 currentTime 归零', b5.currentTime, 0, 0.05);
+
+    /* ---- 8. 结尾全黑期间全程无音乐 ---- */
+    await waitFor(`document.getElementById('blackout').classList.contains('in')`, 6000, '全黑');
+    await sleep(900);
+    const b6 = await bgmOf();
+    assertTrue('bgm 停止：全黑过程中与静止黑屏全程无音乐', b6.paused === true && b6.wanted === false,
+      JSON.stringify(b6));
+    await shot('bgm-3-final-silent');
+  }
+
+  /* ================= 用例 bgm2：BGM 缺失也必须不阻塞开场（Q30） =================
+     需求 §12.6 最后两条：BGM 的加载独立于 preload() 队列；即使音乐文件缺失/加载失败，
+     第一、二幕仍按原时序正常演出，控制台不出现未捕获错误。
+
+     做法：用 Network.setBlockedURLs 屏蔽 BGM 资源（比篡改文件更干净），重新载入页面，
+     断言 ① 第一幕照常渲染（booted = true）② 无未捕获错误 ③ 点 START 不抛异常。
+     这是「BGM 不在 preload() 的 Promise.all 里」这条实现约束的**唯一直接证据** ——
+     若有人把 BGM 塞进开场等待队列，本用例会因「开场被拖住 / 报错」而失败。 */
+  async function caseBgm2() {
+    await cdp.send('Network.enable');
+    await cdp.send('Network.setBlockedURLs', { urls: ['*music-walker-s.wav'] });
+    await reload();                                  // 屏蔽生效后重新载入
+
+    try {
+      // 开场不被拖住：第一幕必须在正常时序内出现
+      await waitFor(`document.getElementById('btn-start').classList.contains('in')`, 20000, 'btn-start 出现');
+      assertTrue('bgm2 BGM 被屏蔽后第一幕照常渲染（booted = true）',
+        (await njState()).booted === true);
+      assertTrue('bgm2 BGM 被屏蔽后未显示启动失败提示',
+        (await njState()).fallbackShown === false);
+
+      await sleep(600);
+      await click('#btn-start');
+      await waitFor(`window.__nj.state().bgm.wanted === true`, 5000, 'BGM 起播请求');
+      await sleep(400);
+      const st = await njState();
+      assertTrue('bgm2 BGM 加载失败时点 START 不抛异常、不阻塞流程（已进入第二幕）',
+        await evaluate(`document.getElementById('act1').classList.contains('out')`));
+      assertTrue('bgm2 BGM 不可用时仍标记为「已请求播放」（不整场静音逻辑不受影响）',
+        st.bgm.wanted === true);
+      assertTrue('bgm2 BGM 不可用时未播放（paused = true），但不影响任何流程',
+        st.bgm.paused === true);
+      await shot('bgm2-blocked');
+
+      // 关键：不能有未捕获错误
+      assertTrue('bgm2 BGM 加载失败不产生未捕获错误', errors.length === 0, errors.join(' | '));
+    } finally {
+      await cdp.send('Network.setBlockedURLs', { urls: [] });
+    }
+  }
+
   async function caseA4() {
     await toAct3Panel();
     await evaluate(`window.__nj.setRotation(0)`);
@@ -1173,12 +1342,12 @@ const INK_TOP_FN = `(() => {
   const CASES = {
     gate: caseGate,
     p1: caseP1, p2: caseP2, flow: caseFlow,
-    a3: caseA3, a3b: caseA3b, a3c: caseA3c, a4: caseA4, full2: caseFull2,
+    a3: caseA3, a3b: caseA3b, a3c: caseA3c, a4: caseA4, bgm: caseBgm, bgm2: caseBgm2, full2: caseFull2,
   };
 
   for (const name of cases) {
     console.log('\n=== 用例 ' + name + ' ===');
-    if (!CASES[name]) { fail('未知用例 ' + name, '可选: gate / p1 / p2 / flow / a3 / a3b / a3c / a4 / full2'); continue; }
+    if (!CASES[name]) { fail('未知用例 ' + name, '可选: gate / p1 / p2 / flow / a3 / a3b / a3c / a4 / bgm / bgm2 / full2'); continue; }
     try {
       await reload();
       await CASES[name]();

@@ -559,6 +559,7 @@
   var STAGE_H = 896;
 
   var AUDIO_SRC = 'audio/toggle.wav';
+  var BGM_SRC = 'audio/music-walker-s.wav';   // 30.0s / PCM 16bit / 44.1kHz / 立体声 / 5.05MB
   var VIDEO_SRC = 'assets/screen3/suitcase-move.mp4';
 
   var LINE1 = 'Wow! I’m traveling somewhere new. Let me get ready.';
@@ -745,6 +746,46 @@
     try { a.currentTime = 0; } catch (e) { /* 未就绪时忽略 */ }
     var p = a.play();
     if (p && typeof p.catch === 'function') p.catch(function () {});
+  }
+
+  /* ================= 背景音乐 BGM（需求 §3.5 / Q27–Q30） =================
+     全片只有 1 个实例，生命周期由两次点击夹住：
+       · 起播 = 点击第一幕 START（之前全程静音）
+       · 停止 = 点击第四幕 Continue（唯一停止点）
+     幕间切换绝不触碰它 —— 不 pause、不回零、不改音量（Q29：跨幕完全连续）。
+     加载独立于 preload() 队列，失败/超时绝不阻塞开场（Q30）。
+     起播点本身是真实用户手势，自动播放策略天然满足，无需任何兜底。 */
+  var bgm = new Audio(BGM_SRC);
+  bgm.preload = 'auto';     // 独立拉取：5.05MB 未压缩 WAV 不进开场等待队列
+  bgm.loop = true;          // Q28
+  bgm.volume = 0.35;        // Q27（点击音效维持 0.85 不变）
+
+  var bgmReady = false;     // 是否可播（canplaythrough 已触发）
+  var bgmWanted = false;    // 玩家已点 START，但音乐可能尚未就绪
+
+  // 就绪：起播点已到则立刻补播（应对「点 START 时还没下载完」）。
+  // 同时监听 canplaythrough 与 loadeddata —— 少数浏览器对 preload=auto 只给后者，
+  // 只等 canplaythrough 会让「补播」永不发生（点了 START 却一直没声）。
+  function onBgmReady() {
+    if (bgmReady) return;
+    bgmReady = true;
+    if (bgmWanted) startBGM();
+  }
+  bgm.addEventListener('canplaythrough', onBgmReady, { once: true });
+  bgm.addEventListener('loadeddata', onBgmReady, { once: true });
+  bgm.addEventListener('error', function () { /* 静默吞掉：绝不阻塞开场、不产生未捕获错误 */ });
+  try { bgm.load(); } catch (e) { /* ignore */ }
+
+  function startBGM() {
+    bgmWanted = true;
+    if (!bgmReady) return;                       // 未就绪 -> 交给 canplaythrough 回调补播
+    var p = bgm.play();
+    if (p && typeof p.catch === 'function') p.catch(function () {});
+  }
+
+  function stopBGM() {
+    bgmWanted = false;
+    try { bgm.pause(); bgm.currentTime = 0; } catch (e) { /* ignore */ }
   }
 
   /* ================= 预加载 ================= */
@@ -1118,6 +1159,9 @@
         setTimeout(function () { btnContinue.classList.add('settled'); }, 520);
         return waitClick(btnContinue);          // Q20：点击 Continue 才转全黑，不自动延时
       })
+      // 点击 Continue 的那一刻立刻停止 BGM（全片唯一停止点，需求 §3.5.1）：
+      // 结尾是「音乐停 -> 画面黑」，随后的 700ms 渐入与静止黑屏全程无音乐。
+      .then(function () { stopBGM(); })
       .then(function () {
         blackout.classList.remove('fast');
         return anim(700, function () { blackout.classList.add('in'); });
@@ -1140,7 +1184,10 @@
       .then(function () { return anim(400, function () { btnStart.classList.add('in'); }); })
 
       // 3. 等待点击 START
+      //    这一下点击是「开始游戏」，也是全片音乐的唯一起点（需求 §3.5.1）：
+      //    点击音效与 BGM 起点重合，两者都响（音效在前，BGM 紧随起播）。
       .then(function () { return waitClick(btnStart); })
+      .then(function () { startBGM(); })
 
       // 4. 交叉转场：第一幕淡出，第二幕（房间）淡入
       .then(function () {
@@ -1233,7 +1280,18 @@
         count: stickerCount, okReady: okReady, placing: !!placing, act3Done: act3Done,
         busy: busy, animLock: animLock,
         booted: booted,                     // 第一幕是否已渲染（看门狗标记）
-        fallbackShown: !!(fallbackBox && !fallbackBox.hidden)   // 是否显示了启动失败提示
+        fallbackShown: !!(fallbackBox && !fallbackBox.hidden),  // 是否显示了启动失败提示
+        // BGM 状态（需求 §3.5 / Q27–Q30）—— 供测试断言，只读
+        bgm: {
+          ready: bgmReady,                  // 是否已完成加载（canplaythrough）
+          wanted: bgmWanted,                // 玩家已点 START、应当正在响
+          paused: bgm.paused,               // 是否暂停
+          loop: bgm.loop,                   // Q28：应为 true
+          volume: bgm.volume,               // Q27：应为 0.35
+          currentTime: bgm.currentTime,     // Q29：跨幕不重启，此值应单调不减
+          src: bgm.src
+        },
+        soundVolume: pool.length ? pool[0].volume : 0   // 点击音效音量（应为 0.85，不受 BGM 影响）
       };
     }
   };
