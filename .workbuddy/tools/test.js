@@ -150,7 +150,7 @@ const INK_TOP_FN = `(() => {
 /* ================= 主流程 ================= */
 (async () => {
   const which = process.argv.slice(2).filter((a) => !a.startsWith('-'));
-  const cases = which.length ? which : ['gate', 'p1', 'p2', 'flow', 'a3', 'a3b', 'a3c', 'a4', 'bgm', 'bgm2', 'full2'];
+  const cases = which.length ? which : ['gate', 'p1', 'p2', 'flow', 'a3', 'a3b', 'a3c', 'a4', 'a5', 'a5b', 'bgm', 'bgm2', 'full2', 'full3'];
 
   const child = spawn(EDGE, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -284,7 +284,7 @@ const INK_TOP_FN = `(() => {
   async function caseGate() {
     const SCENE_SNAP = `(() => {
       const eff = (el) => { let o = 1, n = el; while (n && n !== document.documentElement) { o *= parseFloat(getComputedStyle(n).opacity); n = n.parentElement; } return +o.toFixed(3); };
-      const ids = ['act1', 'act2', 'act3', 'act4', 'bg-room-suitcase', 'shadow'];
+      const ids = ['act1', 'act2', 'act3', 'act4', 'act5', 'act6', 'bg-room-suitcase', 'bg-inside', 'shadow'];
       const out = {};
       ids.forEach((id) => { const el = document.getElementById(id); if (el) out[id] = eff(el); });
       return JSON.stringify(out);
@@ -297,7 +297,10 @@ const INK_TOP_FN = `(() => {
     assertEq('gate 载入时第二幕不可见', s1.act2, 0, 0.01);
     assertEq('gate 载入时第三幕整幕不可见（漏门控就会盖住第一幕）', s1.act3, 0, 0.01);
     assertEq('gate 载入时第四幕整幕不可见', s1.act4, 0, 0.01);
+    assertEq('gate 载入时第五幕整幕不可见（z=5 最高，漏门控必盖住第一幕 —— R19）', s1.act5, 0, 0.01);
+    assertEq('gate 载入时第六幕整幕不可见', s1.act6, 0, 0.01);
     assertEq('gate 载入时第三幕定格图不可见（它是常驻可见元素，最易漏）', s1['bg-room-suitcase'], 0, 0.01);
+    assertEq('gate 载入时第五幕室内背景不可见（同为全屏常驻图，R19）', s1['bg-inside'], 0, 0.01);
     await shot('gate-1-act1-start');
 
     // ② 第二幕进行中：第一幕退场、第三幕仍不可见
@@ -307,6 +310,8 @@ const INK_TOP_FN = `(() => {
     assertEq('gate 第二幕时第二幕可见', s2.act2, 1, 0.01);
     assertEq('gate 第二幕时第三幕仍不可见', s2.act3, 0, 0.01);
     assertEq('gate 第二幕时第四幕仍不可见', s2.act4, 0, 0.01);
+    assertEq('gate 第二幕时第五幕仍不可见', s2.act5, 0, 0.01);
+    assertEq('gate 第二幕时第五幕室内背景仍不可见', s2['bg-inside'], 0, 0.01);
     await shot('gate-2-act2-room');
 
     // ③ 接着第二幕继续推进到第三幕激活：整幕转为可见（防止「修反了」变成永远不显示）
@@ -321,6 +326,26 @@ const INK_TOP_FN = `(() => {
     const s3 = await snap();
     assertEq('gate 第三幕激活后整幕可见', s3.act3, 1, 0.01);
     assertEq('gate 第三幕时定格图可见', s3['bg-room-suitcase'], 1, 0.01);
+    assertEq('gate 第三幕时第五幕仍不可见', s3.act5, 0, 0.01);
+    assertEq('gate 第三幕时第五幕室内背景仍不可见', s3['bg-inside'], 0, 0.01);
+
+    // ④ 各幕必须是「自包含的堆叠上下文」：否则幕内高 z-index 元素会跑到 #stage 层，
+    //    盖住层级更高但幕内元素 z-index 更低的后续幕。
+    //    真实案例：第五幕视频在放，而 #act4 的 #goal01(z=95) 压在 #act5(z=5) 之上，
+    //    表现为「第五幕对话背后还透着 Goal Achieved 卡片」—— 所有几何断言全绿。
+    const gc = await evaluate(`(() => {
+      const ids = ['act1','act2','act3','act4','act5','act6'];
+      const out = {};
+      ids.forEach((id) => {
+        const el = document.getElementById(id);
+        out[id] = el ? getComputedStyle(el).isolation : null;
+      });
+      return JSON.stringify(out);
+    })()`).then(JSON.parse).catch(() => ({}));
+    for (const id of ['act1','act2','act3','act4','act5','act6']) {
+      assertTrue(`gate #${id} 建立自包含堆叠上下文（isolation:isolate）`,
+        gc[id] === 'isolate', '实测 isolation = ' + gc[id]);
+    }
   }
 
   /* ================= 用例 p1：台词文本位置 =================
@@ -562,6 +587,11 @@ const INK_TOP_FN = `(() => {
      ================================================================== */
   // 注意：不能叫 LINE3 —— 上面的 p1 用例已用同名常量做「3 行台词」回归
   const LINE_ACT3 = 'Let\u2019s add our favourite stickers. Now it will be our exclusive suitcase!';
+  // 第五幕四句（全片第 ④–⑦ 句）—— 与需求 §8.3 / §8.6 逐字一致
+  const LINE_ACT4 = 'After over 30 hours of flight, I finally reach this ancient castle.';
+  const LINE_ACT5 = 'I wonder what stories unfolded here. Let\u2019s go in.';
+  const LINE_ACT6 = 'Wow, stepping inside feels like traveling back in time.';
+  const LINE_ACT7 = 'Huh, there are scraps of paper on the floor. What could they be?';
 
   // 从零一路推进到「第三幕已激活」（第二幕黑幕已碎成转场）
   const toAct3 = async () => {
@@ -595,7 +625,21 @@ const INK_TOP_FN = `(() => {
     await sleep(150);
   };
 
-  // 在「画布坐标」处点击：先把画布坐标换算成视口坐标，再派发真实鼠标事件。
+  // 继续推进到第五幕开场（视频播放中）：贴纸玩法 → 点 OK → 第四幕 → 点 Continue → 第五幕激活
+  const toAct5 = async () => {
+    await toAct3Panel();
+    await evaluate(`window.__nj.setRotation(0)`);
+    await place('bag', 250, 400);
+    await place('camera', 400, 550);
+    await place('drink', 300, 680);
+    await waitFor(`window.__nj.state().okReady === true`, 4000, 'OK 可用');
+    await sleep(150);
+    await click('#btn-ok');
+    await waitFor(`document.getElementById('continue').classList.contains('in')`, 10000, 'Continue 滑入');
+    await sleep(600);
+    await click('#continue');
+    await waitFor(`document.getElementById('act5').classList.contains('active')`, 15000, '第五幕激活');
+  };
   // 这正是自由落点玩法最容易出错的地方（#stage 带 scale），测试端也必须换算。
   const clickCanvas = async (cx, cy) => {
     const pt = await evaluate(`(() => {
@@ -1298,12 +1342,254 @@ const INK_TOP_FN = `(() => {
     await sleep(900);
     await shot('a4-3-final-black');
     assertEq('a4 点击 Continue 后画面纯黑', await effOpacity('#blackout'), 1, 0.01);
-    assertTrue('a4 #act5-slot 预留容器存在且为空',
-      await evaluate(`(() => { const s = document.getElementById('act5-slot');
-        return !!s && s.children.length === 0 && s.textContent.trim() === ''; })()`));
+    assertTrue('a4 #act6 / #act6-slot / #act7-slot 预留容器存在（第五幕已升为实际容器 #act5）',
+      await evaluate(`(() => {
+        const a6 = document.getElementById('act6');
+        const s6 = document.getElementById('act6-slot');
+        const s7 = document.getElementById('act7-slot');
+        return !!a6 && a6.children.length === 0
+          && !!s6 && s6.children.length === 0 && s6.textContent.trim() === ''
+          && !!s7 && s7.children.length === 0 && s7.textContent.trim() === '';
+      })()`));
+    assertTrue('a4 旧 #act5-slot 已退役（第五幕升为 #act5 实际容器）',
+      await evaluate(`document.getElementById('act5-slot') === null`));
   }
 
   /* ================= 用例 full2：第一 ~ 第四幕全流程（真实播放视频） ================= */
+  /* ================= 用例 a5：第五幕户外定格图 → 户外对话 → 直接切室内 → 纸片亮相 =================
+     需求 §8.2 B1–B4。守 R19（#act5 门控）、R20（视频降级）、R22（纸片热区）。 */
+  async function caseA5() {
+    await toAct5();
+
+    // --- B1 户外定格图（本轮起取代视频直接担任户外背景层） ---
+    assertEq('a5 第五幕已激活', await effOpacity('#act5'), 1, 0.01);
+    await waitFor(`!document.getElementById('blackout').classList.contains('in')`, 20000, '黑幕淡出露出户外定格图');
+    await waitFor(`window.__nj.state().act5.outdoorIn === true`, 8000, '户外定格图淡入');
+    await sleep(600);
+
+    // 视频已彻底退役：仍在 DOM 中（供体检）但 display:none，不渲染、不播放
+    const ov = await box('#act5-video');
+    assertTrue('a5 video 元素仍在 DOM（供素材体检与识别）',
+      await evaluate(`!!document.getElementById('act5-video')`));
+    assertEq('a5 video 已 display:none（不再渲染）', ov.width, 0, 0);
+    assertTrue('a5 video 从未播放（outdoor 静帧取代视频）',
+      await evaluate(`document.getElementById('act5-video').currentTime === 0`));
+
+    // 户外定格图几何 = 铺满 1200x896
+    const o = await box('#act5-outdoor');
+    assertEq('a5 户外定格图 左边缘 = 0', o.left, 0, 0);
+    assertEq('a5 户外定格图 顶边 = 0', o.top, 0, 0);
+    assertEq('a5 户外定格图 宽 = 1200（铺满）', o.width, 1200, 0);
+    assertEq('a5 户外定格图 高 = 896（铺满）', o.height, 896, 0);
+    assertEq('a5 户外定格图 已显示（opacity 1）', await effOpacity('#act5-outdoor'), 1, 0.02);
+    assertTrue('a5 户外定格图已成功解码（原始尺寸 1200x896）',
+      await evaluate(`(()=>{const e=document.getElementById('act5-outdoor');return e.naturalWidth*10000+e.naturalHeight===12000896})()`));
+    // 用户诉求核心：绝不能再出现第五幕里的「播放中的视频」画面
+    assertEq('a5 该帧无视频在播（#act5 内 video 不可见）', ov.height, 0, 0);
+    await shot('a5-1-video');
+
+    // --- B2 户外对话：chat5a 滑入 ---
+    await waitFor(`document.getElementById('chat5a').classList.contains('in')`, 20000, 'chat5a 滑入');
+    await sleep(700);
+    // 户外两句对话期间：户外定格图继续充当背景，室内背景尚未淡入
+    assertEq('a5 户外对话期间户外定格图仍在（充当户外背景）', await effOpacity('#act5-outdoor'), 1, 0.02);
+    assertEq('a5 户外对话期间室内背景尚未淡入（B4 才切）', await effOpacity('#bg-inside'), 0, 0.02);
+
+    // --- B2 户外对话几何：完全复用第二幕 .chat ---
+    const c5 = await box('#chat5a');
+    assertEq('a5 chat5a 贴底（距画面底 = 0）', c5.fromBottom, 0);
+    assertEq('a5 chat5a 高 = 496', c5.height, 496, 0);
+    assertEq('a5 chat5a 顶边 = 400（复用第二幕几何）', c5.top, 400, 0);
+    const t5 = await box('#chat5a .chat-text');
+    assertEq('a5 第五幕文本区 左边缘 = 380', t5.left, 380);
+    assertEq('a5 第五幕文本区 顶边 = 770.4', t5.top, 770.4);
+    assertEq('a5 第五幕文本区 宽 = 640', t5.width, 640, 0);
+
+    // --- 打字期间 GO 不在画面 ---
+    assertEq('a5 第 ④ 句打字期间 btn-go5a 不在画面', await effOpacity('#btn-go5a'), 0, 0.01);
+
+    await waitFor(`document.getElementById('btn-go5a').classList.contains('in')`, 25000, '第 ④ 句打完');
+    await sleep(400);
+    assertTrue('a5 第 ④ 句文案与需求逐字一致',
+      (await evaluate(`document.querySelector('#chat5a .chat-text').textContent`)) === LINE_ACT4);
+    assertEq('a5 btn-go5a 距画面右 = 100', (await box('#btn-go5a')).fromRight, 100);
+    assertEq('a5 btn-go5a 底边距画面底 = 50', (await box('#btn-go5a')).fromBottom, 50);
+    await shot('a5-2-line4');
+
+    // --- B3 点击 GO → 清空 → 打第 ⑤ 句（同一对话框内换句，不重新滑入） ---
+    await click('#btn-go5a');
+    await waitFor(`document.getElementById('btn-go5a').classList.contains('in')`, 25000, '第 ⑤ 句打完');
+    await sleep(400);
+    assertTrue('a5 第 ⑤ 句文案与需求逐字一致（含弯引号 Let\u2019s）',
+      (await evaluate(`document.querySelector('#chat5a .chat-text').textContent`)) === LINE_ACT5);
+    assertTrue('a5 第 ⑤ 句期间 chat5a 未重新滑入（始终 .in、未 .out）',
+      await hasClass('#chat5a', 'in') && !(await hasClass('#chat5a', 'out')));
+    assertEq('a5 第 ⑤ 句期间 btn-go5a 在画面', await effOpacity('#btn-go5a'), 1, 0.01);
+    await shot('a5-3-line5');
+
+    // --- B3 末 点击 GO → 户外对话框淡出 + 切室内 ---
+    await click('#btn-go5a');
+    await waitFor(`document.getElementById('chat5a').classList.contains('out')`, 4000, 'chat5a 淡出');
+    await sleep(600);
+    assertEq('a5 户外对话框已整体淡出', await effOpacity('#chat5a'), 0, 0.01);
+
+    // --- B4 直接切室内（问题 1 核心：户外对话 → 直接 bg-inside，无中间画面） ---
+    await waitFor(`document.getElementById('btn-papers').classList.contains('in')`, 8000, '纸片淡入');
+    await sleep(500);
+    assertEq('a5 切室内后户外定格图已淡出', await effOpacity('#act5-outdoor'), 0, 0.01);
+    assertEq('a5 室内背景 bg-inside 已淡入', await effOpacity('#bg-inside'), 1, 0.02);
+    assertEq('a5 切室内后黑场已退去（黑幕只是过场，不残留）', await effOpacity('#blackout'), 0, 0.01);
+    assertEq('a5 室内界面即最终界面：纸片在、无第三张过渡图',
+      await effOpacity('#act5'), 1, 0.01);
+    const p = await box('#btn-papers');
+    assertEq('a5 纸片 左边缘 = 715（距右 290）', p.left, 715, 0);
+    assertEq('a5 纸片 距画面右 = 290', p.fromRight, 290, 0);
+    assertEq('a5 纸片 顶边 = 653（距底 120）', p.top, 653, 0);
+    assertEq('a5 纸片 底边距画面底 = 120', p.fromBottom, 120, 0);
+    assertEq('a5 纸片 尺寸 195x123（热区 = 整张外框）', p.width * 1000 + p.height, 195123, 0);
+    assertTrue('a5 纸片此刻可见但尚不可点（对话进行中，Q39）',
+      (await njState()).act5.papersIn === true && (await njState()).act5.papersClickable === false);
+    assertTrue('a5 纸片图片已成功解码（原始宽 195）',
+      await evaluate(`document.getElementById('btn-papers').naturalWidth === 195`));
+    await shot('a5-4-papers');
+  }
+
+  /* ================= 用例 a5b：第五幕室内对话 → 引导手 → 点纸片 → 黑幕转场 =================
+     需求 §8.2 B5–B8。守 R23（第五幕全程静音）、BGM 停止点未变。 */
+  async function caseA5b() {
+    await toAct5();
+
+    // 等户外定格图就位 → 走完户外两句对话（本轮起无视频可等）
+    await waitFor(`!document.getElementById('blackout').classList.contains('in')`, 20000, '黑幕淡出');
+    await waitFor(`window.__nj.state().act5.outdoorIn === true`, 8000, '户外定格图淡入');
+    await waitFor(`document.getElementById('btn-go5a').classList.contains('in')`, 25000, '第 ④ 句打完');
+    await sleep(300);
+    await click('#btn-go5a');
+    await waitFor(`document.getElementById('btn-go5a').classList.contains('in')`, 25000, '第 ⑤ 句打完');
+    await sleep(300);
+    await click('#btn-go5a');
+
+    // --- B5 室内对话 1 ---
+    await waitFor(`document.getElementById('chat5b').classList.contains('in')`, 8000, 'chat5b 滑入');
+    await waitFor(`document.getElementById('btn-go5b').classList.contains('in')`, 25000, '第 ⑥ 句打完');
+    await sleep(400);
+    assertTrue('a5b 第 ⑥ 句文案与需求逐字一致',
+      (await evaluate(`document.querySelector('#chat5b .chat-text').textContent`)) === LINE_ACT6);
+    // chat5b 几何同样复用第二幕
+    assertEq('a5b chat5b 顶边 = 400', (await box('#chat5b')).top, 400, 0);
+    assertEq('a5b chat5b 文本区 左边缘 = 380', (await box('#chat5b .chat-text')).left, 380);
+    await shot('a5b-1-line6');
+
+    // --- B6 点击 GO → 清空 → 打第 ⑦ 句 ---
+    await click('#btn-go5b');
+    await waitFor(`document.getElementById('btn-go5b').classList.contains('in')`, 25000, '第 ⑦ 句打完');
+    await sleep(400);
+    assertTrue('a5b 第 ⑦ 句文案与需求逐字一致',
+      (await evaluate(`document.querySelector('#chat5b .chat-text').textContent`)) === LINE_ACT7);
+    await shot('a5b-2-line7');
+
+    // --- B7 点击 GO → 对话框整体消失 → 引导手出现、纸片可点 ---
+    await click('#btn-go5b');
+    await waitFor(`document.getElementById('chat5b').classList.contains('out')`, 4000, 'chat5b 淡出');
+    await sleep(600);
+    assertEq('a5b 室内对话框已整体淡出（含姓名牌）', await effOpacity('#chat5b'), 0, 0.01);
+    assertEq('a5b 对话框消失后姓名牌图也全透明',
+      await effOpacity('#chat5b .chat-frame'), 0, 0.01);
+
+    await waitFor(`document.getElementById('hand5').classList.contains('in')`, 6000, '引导手出现');
+    await waitFor(`window.__nj.state().act5.papersClickable === true`, 4000, '纸片可点');
+    await sleep(500);
+    assertEq('a5b 引导手 hand5 已出现', await effOpacity('#hand5'), 1, 0.01);
+    assertTrue('a5b 引导手不可点击（pointer-events:none）',
+      (await box('#hand5')).pointerEvents === 'none');
+    assertTrue('a5b 引导手指尖指向纸片（指尖 x 落在纸片横向范围内）',
+      await evaluate(`(() => {
+        const h = document.getElementById('hand5'), p = document.getElementById('btn-papers');
+        const hx = h.offsetLeft + 0.07 * h.offsetWidth;   // transform-origin: 7% 0%
+        return hx >= p.offsetLeft && hx <= p.offsetLeft + p.offsetWidth;
+      })()`));
+    assertTrue('a5b 此刻唯一可点目标 = 纸片（cursor:pointer）',
+      (await box('#btn-papers')).pointerEvents === 'auto');
+    assertTrue('a5b 纸片本身仍可见（引导阶段不隐藏，Q38）',
+      (await njState()).act5.papersIn === true);
+    await shot('a5b-3-hand');
+
+    // --- B8 点击纸片 → 引导手隐藏、纸片保留 → 黑幕渐入 → 转场 ---
+    // 顺手确认「第五幕全程静音」（R23：终点由第四幕末后移，必须断言没有意外复播）
+    assertTrue('a5b 第五幕全程 BGM 保持停止（Q32：停止点未变，此后不再起播）',
+      (await njState()).bgm.paused === true);
+    await click('#btn-papers');
+    await waitFor(`!document.getElementById('hand5').classList.contains('in')`, 4000, '引导手隐藏');
+    await sleep(400);
+    assertEq('a5b 点击纸片后引导手已隐藏', await effOpacity('#hand5'), 0, 0.01);
+    assertEq('a5b 点击纸片后纸片本身保留可见（Q38）', await effOpacity('#btn-papers'), 1, 0.01);
+    assertTrue('a5b 点击纸片后纸片不再可点', (await box('#btn-papers')).pointerEvents === 'none');
+
+    await waitFor(`document.getElementById('blackout').classList.contains('in')`, 6000, '黑幕渐入');
+    await sleep(900);
+    assertEq('a5b 第五幕末画面全黑（转场，非终点）', await effOpacity('#blackout'), 1, 0.01);
+    assertTrue('a5b 第五幕收尾 BGM 仍停止（R23 副作用复查）',
+      (await njState()).bgm.paused === true);
+    assertTrue('a5b 第五幕无控制台报错', errors.length === 0, errors.join(' | '));
+    await shot('a5b-4-black');
+  }
+
+  /* ================= 用例 full3：第一 ~ 第五幕全流程（第三幕视频真播，第五幕为静帧） ================= */
+  async function caseFull3() {
+    // 第三幕开场单独真播（验证真实时序），其余复用公共前置
+    await toAct3();
+    await waitFor(`document.getElementById('act3-video').currentTime > 0`, 10000, '第三幕视频开播');
+    await waitFor(`document.getElementById('chat3').classList.contains('in')`, 25000, '视频播完滑入对话框');
+    await waitFor(`document.getElementById('btn-go3').classList.contains('in')`, 25000, '第三句打完');
+    await sleep(300);
+    await click('#btn-go3');
+    await waitFor(`document.getElementById('sticker-frame').classList.contains('in')`, 10000, '面板滑入');
+    await waitFor(`document.getElementById('btn-ok').classList.contains('in')`, 12000, '按钮滑入');
+    await waitFor(`window.__nj.state().busy === false`, 8000, '演出锁释放');
+    await sleep(250);
+
+    await evaluate(`window.__nj.setRotation(0)`);
+    await place('bag', 260, 380);
+    await place('love', 420, 520);
+    await place('travel', 320, 660);
+    assertEq('full3 贴满 3 张', await placedCount(), 3);
+    await click('#btn-ok');
+    await waitFor(`document.getElementById('continue').classList.contains('in')`, 10000, 'Continue 滑入');
+    await sleep(600);
+    await click('#continue');
+    assertTrue('full3 点 Continue 后 BGM 即刻停止（停止点未变，Q32）',
+      await waitFor(`window.__nj.state().bgm.paused === true`, 4000, 'BGM 停止'));
+
+    // 第五幕户外定格图淡入（本轮起不再播视频）
+    await waitFor(`window.__nj.state().act5.outdoorIn === true`, 20000, '户外定格图淡入');
+    assertEq('full3 第五幕户外定格图显示中', await effOpacity('#act5-outdoor'), 1, 0.02);
+    assertTrue('full3 第五幕 video 未播放（静帧取代视频）',
+      await evaluate(`document.getElementById('act5-video').currentTime === 0`));
+    await waitFor(`document.getElementById('chat5a').classList.contains('in')`, 25000, '滑入 chat5a');
+    await waitFor(`document.getElementById('btn-go5a').classList.contains('in')`, 25000, '第 ④ 句打完');
+    await sleep(300);
+    await click('#btn-go5a');
+    await waitFor(`document.getElementById('btn-go5a').classList.contains('in')`, 25000, '第 ⑤ 句打完');
+    await sleep(300);
+    await click('#btn-go5a');
+    await waitFor(`document.getElementById('btn-go5b').classList.contains('in')`, 25000, '第 ⑥ 句打完');
+    await sleep(300);
+    await click('#btn-go5b');
+    await waitFor(`document.getElementById('btn-go5b').classList.contains('in')`, 25000, '第 ⑦ 句打完');
+    await sleep(300);
+    await click('#btn-go5b');
+    await waitFor(`window.__nj.state().act5.papersClickable === true`, 8000, '纸片可点');
+    await sleep(300);
+    await click('#btn-papers');
+    await waitFor(`document.getElementById('blackout').classList.contains('in')`, 8000, '第五幕末全黑');
+    await sleep(900);
+    assertEq('full3 终态（第五幕末）纯黑', await effOpacity('#blackout'), 1, 0.01);
+    assertTrue('full3 第五幕全程 BGM 保持停止', (await njState()).bgm.paused === true);
+    await shot('full3-1-black');
+    assertTrue('full3 全流程无控制台报错', errors.length === 0, errors.join(' | '));
+  }
+
+  /* ================= 用例 full2：第一 ~ 第四幕（真实播放视频） ================= */
   async function caseFull2() {
     await toAct3();
     // 真等视频播完（不快进），验证真实时序
@@ -1343,11 +1629,12 @@ const INK_TOP_FN = `(() => {
     gate: caseGate,
     p1: caseP1, p2: caseP2, flow: caseFlow,
     a3: caseA3, a3b: caseA3b, a3c: caseA3c, a4: caseA4, bgm: caseBgm, bgm2: caseBgm2, full2: caseFull2,
+    a5: caseA5, a5b: caseA5b, full3: caseFull3,
   };
 
   for (const name of cases) {
     console.log('\n=== 用例 ' + name + ' ===');
-    if (!CASES[name]) { fail('未知用例 ' + name, '可选: gate / p1 / p2 / flow / a3 / a3b / a3c / a4 / bgm / bgm2 / full2'); continue; }
+    if (!CASES[name]) { fail('未知用例 ' + name, '可选: gate / p1 / p2 / flow / a3 / a3b / a3c / a4 / a5 / a5b / bgm / bgm2 / full2 / full3'); continue; }
     try {
       await reload();
       await CASES[name]();

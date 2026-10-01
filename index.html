@@ -35,6 +35,12 @@
 
   /* ---------- 场景层 ---------- */
   .scene { position: absolute; inset: 0; }
+  /* 每一幕必须是「自包含的堆叠上下文」，否则幕内元素的 z-index 会跑到 #stage 层
+     与其他幕的高层元素抢层级 —— 例如 #act4 的 #goal01(z=95) 会盖住 #act5(z=5)。
+     成因：#act4 在 .active 时 opacity:1，就不再创建堆叠上下文了（opacity<1 才创建）。
+     isolation:isolate 强制创建堆叠上下文，让幕内 z-index 全部被限制在本幕内。
+     支持度：Chrome 41+ / Edge 15+ / Firefox 36+，与本页最低要求一致。 */
+  .scene { isolation: isolate; }
 
   #act1 { opacity: 1; transition: opacity .4s ease-out; }
   #act1.out { opacity: 0; pointer-events: none; }
@@ -178,8 +184,10 @@
      必须放在 .in 之后：两者同特异性，靠声明顺序取胜。 */
   #blackout.guard { opacity: 0; pointer-events: auto; }
 
-  /* ---------- 后续幕预留容器（保持为空） ---------- */
-  #act3-slot, #act5-slot { position: absolute; inset: 0; z-index: 110; pointer-events: none; }
+  /* ---------- 后续幕预留容器（保持为空） ----------
+     #act6 已由预留位升为第五幕之后的实际容器（见下方「第六幕」段），
+     这里只留 #act6-slot（第五幕以前的旧 #act5-slot）与新的 #act7-slot。 */
+  #act3-slot, #act6-slot, #act7-slot { position: absolute; inset: 0; z-index: 110; pointer-events: none; }
 
   /* ==================================================================
      第三幕：贴纸定制（z-index 3，位于 #act2(2) 之上、#blackout(100) 之下）
@@ -323,6 +331,100 @@
   #continue.in.ready:active { transform: translateY(0) scale(.95); }
   #continue.in.settled { transition: transform .15s ease-out, opacity .2s ease-out; }
 
+  /* ==================================================================
+     第五幕：古城堡（z-index 5，位于 #act4(4) 之上、#blackout(100) 之下）
+     ==================================================================
+     ⚠️ 门控是本版最高风险点（开发计划 §9.2 R19 / 需求 §9.1.1，D4 的翻版）：
+     #bg-inside.png 是「常驻可见」的全屏定格图（1200x896，无透明通道），
+     不像 #act5-video 那样自带 opacity:0。而 #act5 的 z-index(5) 高于前四幕，
+     一旦容器漏写 opacity:0，这张图会从页面载入的第一帧起盖住所有画面。
+     所以：容器默认 opacity:0 + .active 转可见；激活那一刻 #blackout 仍全黑，
+     瞬时切换即可，不加过渡更安全（与 #act3 / #act4 同做法）。 */
+  #act5 { opacity: 0; z-index: 5; pointer-events: none; }
+  #act5.active { opacity: 1; pointer-events: auto; }
+
+  /* 户外定格图（= 视频末帧）：本幕的户外背景层。
+     注：video 元素仍保留在 DOM 中并注入 src（供「素材体检」与旧断言识别），
+     但它带 .hidden 属性恒不参与渲染，户外视觉一律由这张定格图承担。 */
+  #act5-video { display: none; }
+
+  #act5-outdoor {
+    position: absolute; left: 0; top: 0; width: 1200px; height: 896px;
+    z-index: 1;
+    opacity: 0;
+    transition: opacity .4s ease-out;
+  }
+  #act5-outdoor.in { opacity: 1; }
+
+  #bg-inside {
+    position: absolute; left: 0; top: 0; width: 1200px; height: 896px;
+    z-index: 2;
+    opacity: 0;
+    transition: opacity .4s ease-out;
+  }
+  #bg-inside.in { opacity: 1; }
+
+  /* 第五幕两段对话弹窗：几何完全复用第二幕 .chat（同一份 screen2/chat.png） */
+  #chat5a, #chat5b { z-index: 30; }
+  /* 两段对话的 GO 按钮（跨幕复用 screen2/btn-go.png，共 4 处点击） */
+  #btn-go5a, #btn-go5b {
+    position: absolute;
+    right: 100px; bottom: 50px;        /* 38x47 -> left 1062, top 799 */
+    width: 38px; height: 47px;
+    z-index: 40;
+    transform-origin: center center;
+    opacity: 0;
+    transition: opacity .3s ease-out, transform .15s ease-out;
+    pointer-events: none;
+  }
+  #btn-go5a.in, #btn-go5b.in { opacity: 1; pointer-events: auto; cursor: pointer; }
+  #btn-go5a.in:hover, #btn-go5b.in:hover { transform: scale(1.15); }
+  #btn-go5a.in:active, #btn-go5b.in:active { transform: scale(.92); }
+
+  /* 地上的纸片：距右 290 / 距底 120（Q36 已定案，按图片外接框 195x123 计）
+     left = 1200 - 290 - 195 = 715；top = 896 - 120 - 123 = 653
+     B4 出现时淡入但不可点（对话正在进行）；B7 引导手出现后才变可点。 */
+  #btn-papers {
+    position: absolute; left: 715px; top: 653px; width: 195px; height: 123px;
+    z-index: 40;
+    opacity: 0;
+    transition: opacity .4s ease-out, transform .15s ease-out, filter .2s ease-out;
+    pointer-events: none;
+  }
+  #btn-papers.in { opacity: 1; }
+  /* 只有进入 B7 才放开点击（否则对话期间点击纸片会打断流程） */
+  #btn-papers.in.clickable { pointer-events: auto; cursor: pointer; }
+  #btn-papers.in.clickable:hover { transform: scale(1.05); }
+  #btn-papers.in.clickable:active { transform: scale(.96); }
+
+  /* 第五幕引导手：复用 screen2/hand.png，指尖(transform-origin 7% 0%)指向纸片。
+     实测 hand.png 的指尖像素 = (11, 0)，即 7% × 165 ≈ 11.55，与 transform-origin 一致。
+     纸片外接框 = left 715 / top 653 / 195x123，中心 = (812.5, 714.5)。
+     指尖画布坐标 = (left + 11.55, top)：
+       取 left = 801 -> 指尖 x ≈ 812.6（对准纸片横向中心，与既有断言一致）
+       取 top  = 596 -> 指尖 y = 596，停在纸片上沿（653）之上约 57px，
+                        是「从上方指向纸片」的姿态，不遮住纸片本身。
+     该值属目测校准项（需求 §8.7），实现后按截图微调。 */
+  #hand5 {
+    position: absolute; left: 801px; top: 596px;
+    width: 165px; height: 161px;
+    z-index: 20;
+    opacity: 0;
+    transform-origin: 7% 0%;
+    pointer-events: none;
+    transition: opacity .3s ease-out;
+    animation: tap .9s ease-in-out infinite;
+  }
+  #hand5.in { opacity: 1; }
+
+  /* ==================================================================
+     第六幕：拼碎纸 / 修复古画（z-index 6，预留；需求 §9.1）
+     ==================================================================
+     玩法尚未由用户描述，此处只立容器与门控，不接入任何元素、不写断言。
+     门控同样必须自带 opacity:0（R19 同源风险）。 */
+  #act6 { opacity: 0; z-index: 6; pointer-events: none; }
+  #act6.active { opacity: 1; pointer-events: auto; }
+
   /* ---------- 启动失败兜底提示 ----------
      本页所有元素默认 opacity:0，靠 JS 加 .in 才显示。
      脚本一旦没跑起来，页面就是「全黑 + 点不动 + 毫无提示」，
@@ -459,12 +561,47 @@
       <img id="continue" src="assets/screen4/Continue.png" alt="Continue">
     </section>
 
+    <!-- ========== 第五幕：古城堡（z-index 5） ==========
+         注意：容器自带 opacity:0 门控（见 CSS 注释），常驻可见的 #bg-inside 靠它藏住。 -->
+    <section id="act5" class="scene">
+      <!-- 户外定格图（= 视频末帧的静帧）：本幕真正的户外背景层，取代视频直接显示 -->
+      <img id="act5-outdoor" src="assets/screen5/outdoor-still.png" alt="">
+      <!-- video 仅保留供素材体检与识别，display:none 恒不渲染 -->
+      <video id="act5-video" playsinline muted preload="none"></video>
+      <!-- 室内背景：户外两句对话点完 GO 后直接淡入取代户外定格图 -->
+      <img id="bg-inside" src="assets/screen5/bg-inside.png" alt="">
+
+      <!-- 地上的纸片：距右 290 / 距底 120 -> left 715 / top 653（Q36 定案） -->
+      <img id="btn-papers" src="assets/screen5/btn-papers.png" alt="">
+
+      <!-- 引导手（复用 screen2/hand.png），指尖指向纸片 -->
+      <img id="hand5" src="assets/screen2/hand.png" alt="">
+
+      <!-- 第一段对话（户外，第 ④–⑤ 句）：几何完全复用第二幕 .chat -->
+      <div id="chat5a" class="chat">
+        <img class="chat-frame" src="assets/screen2/chat.png" alt="">
+        <p class="chat-text"></p>
+      </div>
+      <img id="btn-go5a" src="assets/screen2/btn-go.png" alt="GO">
+
+      <!-- 第二段对话（室内，第 ⑥–⑦ 句） -->
+      <div id="chat5b" class="chat">
+        <img class="chat-frame" src="assets/screen2/chat.png" alt="">
+        <p class="chat-text"></p>
+      </div>
+      <img id="btn-go5b" src="assets/screen2/btn-go.png" alt="GO">
+    </section>
+
+    <!-- ========== 第六幕：拼碎纸 / 修复古画（预留，玩法待用户描述） ========== -->
+    <section id="act6" class="scene"></section>
+
     <!-- ========== 遮黑层 ========== -->
     <div id="blackout"></div>
 
     <!-- ========== 后续幕预留位（保持为空） ========== -->
     <div id="act3-slot"></div>
-    <div id="act5-slot"></div>
+    <div id="act6-slot"></div>
+    <div id="act7-slot"></div>
 
   </div>
 </div>
@@ -561,10 +698,16 @@
   var AUDIO_SRC = 'audio/toggle.wav';
   var BGM_SRC = 'audio/music-walker-s.wav';   // 30.0s / PCM 16bit / 44.1kHz / 立体声 / 5.05MB
   var VIDEO_SRC = 'assets/screen3/suitcase-move.mp4';
+  var VIDEO5_SRC = 'assets/screen5/oldbuilding-move.mp4';   // 第五幕开场视频（与第三幕同规格）
 
   var LINE1 = 'Wow! I’m traveling somewhere new. Let me get ready.';
   var LINE2 = 'This brand-new suitcase has no marks. Someone might take it by mistake.';
   var LINE3 = 'Let’s add our favourite stickers. Now it will be our exclusive suitcase!';
+  /* 第五幕四句（全片第 ④–⑦ 句，含弯引号 ’）—— 需求 §8.3 / §8.6 原样保留 */
+  var LINE4 = 'After over 30 hours of flight, I finally reach this ancient castle.';
+  var LINE5 = 'I wonder what stories unfolded here. Let’s go in.';
+  var LINE6 = 'Wow, stepping inside feels like traveling back in time.';
+  var LINE7 = 'Huh, there are scraps of paper on the floor. What could they be?';
 
   var TYPE_SPEED = 40;        // ms / 字
   var CLICK_COOLDOWN = 300;
@@ -612,6 +755,16 @@
     'assets/screen4/Continue.png'
   ];
 
+  /* 第五幕（≈ 11.8MB，户外定格图 + 室内背景占大头）：在第四幕末尾转场期间并行预加载。
+     chat.png / btn-go.png / hand.png 已在首屏队列里加载过（第二幕用过），不重复预取。
+     注：outdoor-still.png 是「视频末帧的静帧」，本轮起取代视频直接担任户外背景层；
+     video5 仅保留在 DOM 中供素材体检与识别（display:none，不渲染）。 */
+  var ACT5_IMAGES = [
+    'assets/screen5/outdoor-still.png',
+    'assets/screen5/bg-inside.png',
+    'assets/screen5/btn-papers.png'
+  ];
+
   /* ================= DOM ================= */
   var stage      = document.getElementById('stage');
 
@@ -641,6 +794,19 @@
   var goal01      = document.getElementById('goal01');
   var btnContinue = document.getElementById('continue');
 
+  var act5        = document.getElementById('act5');
+  var video5      = document.getElementById('act5-video');
+  var outdoor5    = document.getElementById('act5-outdoor');
+  var bgInside    = document.getElementById('bg-inside');
+  var btnPapers   = document.getElementById('btn-papers');
+  var hand5       = document.getElementById('hand5');
+  var chat5a      = document.getElementById('chat5a');
+  var chat5aText  = chat5a.querySelector('.chat-text');
+  var btnGo5a     = document.getElementById('btn-go5a');
+  var chat5b      = document.getElementById('chat5b');
+  var chat5bText  = chat5b.querySelector('.chat-text');
+  var btnGo5b     = document.getElementById('btn-go5b');
+
   var blackout   = document.getElementById('blackout');
 
   /* 调色板 12 张贴纸：槽位坐标的唯一来源是 HTML 的内联样式，避免两处各写一份 */
@@ -668,6 +834,8 @@
   var lastPointer = null;    // 最近一次光标的画布坐标
   var rafPending = false;
   var preload34 = null;
+  var preload5 = null;
+  var act5Done = false;      // 第五幕是否已开始，防重复触发
   var rotOverride = null;    // 测试钩子：固定落定旋转角
 
   /* ================= 工具 ================= */
@@ -818,16 +986,21 @@
 
   // 视频的 src 到此刻才注入：首屏不会去拉这 4.54MB
   function loadVideo() {
+    return loadVideoEl(video, VIDEO_SRC, 4000);
+  }
+
+  // 通用：给某个 <video> 注入 src 并等到可播（或超时/出错，绝不卡住流程）
+  function loadVideoEl(el, src, timeoutMs) {
     return new Promise(function (res) {
       var done = false;
       function fin() { if (done) return; done = true; res(); }
-      if (!video.getAttribute('src')) video.src = VIDEO_SRC;
-      video.preload = 'auto';
-      video.addEventListener('canplaythrough', fin, { once: true });
-      video.addEventListener('loadeddata', fin, { once: true });
-      video.addEventListener('error', fin, { once: true });
-      try { video.load(); } catch (e) { fin(); }
-      setTimeout(fin, 4000);   // 兜底，绝不卡住流程
+      if (!el.getAttribute('src')) el.src = src;
+      el.preload = 'auto';
+      el.addEventListener('canplaythrough', fin, { once: true });
+      el.addEventListener('loadeddata', fin, { once: true });
+      el.addEventListener('error', fin, { once: true });
+      try { el.load(); } catch (e) { fin(); }
+      setTimeout(fin, timeoutMs);   // 兜底，绝不卡住流程
     });
   }
 
@@ -836,6 +1009,18 @@
       preload34 = Promise.all([Promise.all(ACT34_IMAGES.map(loadImage)), loadVideo()]);
     }
     return preload34;
+  }
+
+  // 第五幕素材（静态图）：在第四幕末尾转场期间并行预取。
+  // 视频只是「体检用」的冗余挂载 —— 给 video5 注入 src 但不等待（不阻塞流程）。
+  function preloadAct5() {
+    if (!preload5) {
+      try {
+        if (!video5.getAttribute('src')) { video5.src = VIDEO5_SRC; video5.load(); }
+      } catch (e) { /* ignore */ }
+      preload5 = Promise.all(ACT5_IMAGES.map(loadImage));
+    }
+    return preload5;
   }
 
   /* ================= 打字机 ================= */
@@ -1026,24 +1211,29 @@
 
   // A1：自动播放视频。返回 true = 真的播起来了；false = 不可用，走降级路径
   function playVideo() {
+    return playVideoEl(video);
+  }
+
+  // 通用：播放某个已就绪的 <video>，返回是否成功开播（失败返回 false，由调用方走降级）
+  function playVideoEl(el) {
     return new Promise(function (resolve) {
       var done = false;
       function fin(ok) { if (done) return; done = true; resolve(ok); }
 
-      if (video.readyState >= 2) {        // 预加载已完成，直接开播
-        try { video.currentTime = 0; } catch (e) {}
-        try { video.play(); } catch (e) {}
-        video.classList.add('in');
+      if (el.readyState >= 2) {           // 预加载已完成，直接开播
+        try { el.currentTime = 0; } catch (e) {}
+        try { el.play(); } catch (e) {}
+        el.classList.add('in');
         return fin(true);
       }
 
-      video.classList.add('in');
+      el.classList.add('in');
       var p = null;
-      try { p = video.play(); } catch (e) { p = null; }
+      try { p = el.play(); } catch (e) { p = null; }
       if (p && typeof p.catch === 'function') p.catch(function () { fin(false); });
 
-      video.addEventListener('playing', function onPlaying() {
-        video.removeEventListener('playing', onPlaying);
+      el.addEventListener('playing', function onPlaying() {
+        el.removeEventListener('playing', onPlaying);
         fin(true);
       });
       setTimeout(function () { fin(false); }, 3000);   // 3s 未就绪 → 降级，绝不让流程卡死
@@ -1161,11 +1351,126 @@
       })
       // 点击 Continue 的那一刻立刻停止 BGM（全片唯一停止点，需求 §3.5.1）：
       // 结尾是「音乐停 -> 画面黑」，随后的 700ms 渐入与静止黑屏全程无音乐。
-      .then(function () { stopBGM(); })
+      // ⚠️ Q32（v2.12 确认）：停止点保持原样，此后不再起播 —— 第五幕及后续各幕全程静音。
+      .then(function () {
+        preloadAct5();                 // 第五幕 9.5MB 与黑幕渐入并行预取（不阻塞）
+        stopBGM();
+      })
       .then(function () {
         blackout.classList.remove('fast');
         return anim(700, function () { blackout.classList.add('in'); });
       });
+  }
+
+  /* ================= 第五幕：古城堡（需求 §8） =================
+     B1 视频 → B2/B3 户外两句对话 → B4 进室内 + 纸片亮相
+     → B5/B6 室内两句对话 → B7 引导手 → B8 点纸片 → 黑幕转场（衔接第六幕）
+     ⚠️ BGM 全程无动作（Q32）：早在第四幕点 Continue 时就已停止。
+     ⚠️ 推进点共 4 处（btn-go5a × 2、btn-go5b × 2），每段独立，靠 busy 锁防连点。 */
+  function runAct5() {
+    // 幕容器转为可见（此刻 #act5-outdoor / #bg-inside 各自仍是 opacity:0，画面仍全黑）
+    act5.classList.add('active');
+    act5Done = true;
+
+    return Promise.resolve()
+
+      // B1 黑幕停留 500ms → 户外定格图淡入（不再播放视频，直接显示静帧）
+      .then(function () { return sleep(500); })
+      .then(function () {
+        blackout.classList.add('fast');
+        return anim(400, function () {
+          outdoor5.classList.add('in');
+          blackout.classList.remove('in');
+          blackout.classList.add('guard');
+        });
+      })
+      .then(function () { blackout.classList.remove('guard'); })
+
+      // B2 户外对话 1：chat5a 自下而上滑入 → 打第 ④ 句 → 打完出 GO
+      .then(function () { return anim(600, function () { chat5a.classList.add('in'); }); })
+      .then(function () { return typeText(LINE4, TYPE_SPEED, chat5aText); })
+      .then(function () { return anim(300, function () { btnGo5a.classList.add('in'); }); })
+
+      // B3 点击 GO → 清空 ④ → 打 ⑤（同一对话框内换句，不重新滑入）
+      .then(function () { return waitClick(btnGo5a); })
+      .then(function () {
+        btnGo5a.classList.remove('in');
+        chat5aText.textContent = '';
+        return sleep(300);
+      })
+      .then(function () { return typeText(LINE5, TYPE_SPEED, chat5aText); })
+      .then(function () { return anim(300, function () { btnGo5a.classList.add('in'); }); })
+
+      // B3 末 点击 GO → 隐藏按钮 → 清空 → 户外对话框整体淡出
+      .then(function () { return waitClick(btnGo5a); })
+      .then(function () {
+        btnGo5a.classList.remove('in');
+        chat5aText.textContent = '';
+        return sleep(300);
+      })
+      .then(function () { return anim(400, function () { chat5a.classList.add('out'); }); })
+
+      // B4 直接切室内（本轮用户要求）：户外定格图淡出 + bg-inside 淡入，同一时刻交叉，
+      //     不加黑场 —— 中间不出现任何别的画面。
+      .then(function () {
+        return anim(400, function () {
+          outdoor5.classList.remove('in');
+          bgInside.classList.add('in');
+        });
+      })
+      // 纸片淡入
+      .then(function () { return anim(400, function () { btnPapers.classList.add('in'); }); })
+
+      // B5 室内对话 1：chat5b 再次滑入 → 打第 ⑥ 句 → 打完出 GO
+      .then(function () { return anim(600, function () { chat5b.classList.add('in'); }); })
+      .then(function () { return typeText(LINE6, TYPE_SPEED, chat5bText); })
+      .then(function () { return anim(300, function () { btnGo5b.classList.add('in'); }); })
+
+      // B6 点击 GO → 清空 ⑥ → 打 ⑦（同为同一对话框内换句）
+      .then(function () { return waitClick(btnGo5b); })
+      .then(function () {
+        btnGo5b.classList.remove('in');
+        chat5bText.textContent = '';
+        return sleep(300);
+      })
+      .then(function () { return typeText(LINE7, TYPE_SPEED, chat5bText); })
+      .then(function () { return anim(300, function () { btnGo5b.classList.add('in'); }); })
+
+      // B7 点击 GO → 隐藏按钮 → 清空 → 整个对话框（含姓名牌）整体淡出 → 引导手出现、纸片可点
+      .then(function () { return waitClick(btnGo5b); })
+      .then(function () {
+        btnGo5b.classList.remove('in');
+        chat5bText.textContent = '';
+        return sleep(300);
+      })
+      .then(function () { return anim(400, function () { chat5b.classList.add('out'); }); })
+      .then(function () {
+        // 进入点击等待前必须先解除演出锁，否则 waitClick 里的 busy 判定会把点击全吞掉
+        busy = false;
+        return new Promise(function (resolve) {
+          setTimeout(function () {
+            hand5.classList.add('in');
+            btnPapers.classList.add('clickable');
+            resolve();
+          }, 300);
+        });
+      })
+      .then(function () { return waitClick(btnPapers); })
+
+      // B8 点击纸片 → 引导手隐藏（纸片保留，Q38）→ 黑幕渐入 700ms → 转场（非终点）
+      .then(function () {
+        btnPapers.classList.remove('clickable');
+        return anim(300, function () { hand5.classList.remove('in'); });
+      })
+      .then(function () {
+        // BGM 无动作（Q32：早在第四幕末已停，第五幕全程静音）
+        blackout.classList.remove('fast');
+        return anim(700, function () { blackout.classList.add('in'); });
+      })
+
+      // B8 末 黑幕停留 500ms 作为转场（并行预加载第六幕素材），衔接第六幕
+      //     第六幕玩法待用户描述，此处只留转场钩子，不接入任何元素。
+      .then(function () { return sleep(500); });
   }
 
   /* ================= 主流程 ================= */
@@ -1260,8 +1565,11 @@
       .then(runStickerPanelIntro)
       .then(runStickerPlay)
 
-      // 20. 第四幕：蒙黑 → Goal → Continue → 全黑静止（Demo 结束）
+      // 20. 第四幕：蒙黑 → Goal → Continue → 全黑（v2.12 起此黑屏是转场，衔接第五幕）
       .then(runAct4)
+
+      // 21. 第五幕：视频 → 户外两句 → 进室内 → 室内两句 → 引导手 → 点纸片 → 黑幕转场
+      .then(runAct5)
 
       .catch(function (err) {
         reportFailure('运行出错', (err && (err.stack || err.message)) || String(err));
@@ -1281,6 +1589,19 @@
         busy: busy, animLock: animLock,
         booted: booted,                     // 第一幕是否已渲染（看门狗标记）
         fallbackShown: !!(fallbackBox && !fallbackBox.hidden),  // 是否显示了启动失败提示
+        // 第五幕状态（需求 §8）—— 供测试断言，只读
+        act5: {
+          started: act5Done,                     // 第五幕是否已进入
+          outdoorIn: outdoor5.classList.contains('in'),   // 户外定格图是否显示中
+          videoReady: video5.readyState >= 2,
+          videoEnded: video5.ended,
+          chat5aIn: chat5a.classList.contains('in'),
+          chat5bIn: chat5b.classList.contains('in'),
+          papersIn: btnPapers.classList.contains('in'),
+          papersClickable: btnPapers.classList.contains('clickable'),
+          hand5In: hand5.classList.contains('in'),
+          bgInsideIn: bgInside.classList.contains('in')
+        },
         // BGM 状态（需求 §3.5 / Q27–Q30）—— 供测试断言，只读
         bgm: {
           ready: bgmReady,                  // 是否已完成加载（canplaythrough）
