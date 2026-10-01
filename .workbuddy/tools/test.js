@@ -1526,6 +1526,27 @@ const INK_TOP_FN = `(() => {
       })()`), 57, 0.5);
     assertTrue('a5b 此刻唯一可点目标 = 纸片（cursor:pointer）',
       (await box('#btn-papers')).pointerEvents === 'auto');
+    // 问题 3：引导手必须位于纸片图层之上（z-index 严格更大）
+    const zHand = await evaluate(`parseInt(getComputedStyle(document.getElementById('hand5')).zIndex, 10)`);
+    const zPapers = await evaluate(`parseInt(getComputedStyle(document.getElementById('btn-papers')).zIndex, 10)`);
+    const zBlack = await evaluate(`parseInt(getComputedStyle(document.getElementById('blackout')).zIndex, 10)`);
+    assertTrue('a5b 引导手 z-index(' + zHand + ') > 纸片 z-index(' + zPapers + ')',
+      zHand > zPapers);
+    assertTrue('a5b 引导手 z-index(' + zHand + ') < 黑幕 z-index(' + zBlack + ')（不盖过转场）',
+      zHand < zBlack);
+    // 同一堆叠上下文内：DOM 上方的元素在高 z-index 相同时才优先，这里靠显式 z-index 取胜
+    assertTrue('a5b 引导手与纸片处于同一堆叠上下文（同为 #act5 直接子元素）',
+      await evaluate(`document.getElementById('hand5').parentElement.id === 'act5' &&
+        document.getElementById('btn-papers').parentElement.id === 'act5'`));
+    // 视觉验证：两图重叠区域采样「墨迹」，确认手确实压住了纸片
+    assertTrue('a5b 手与纸片确有重叠（指尖压住纸片上沿区域）',
+      await evaluate(`(() => {
+        const h = document.getElementById('hand5'), p = document.getElementById('btn-papers');
+        return !(h.offsetLeft + h.offsetWidth < p.offsetLeft ||
+                 h.offsetTop + h.offsetHeight < p.offsetTop ||
+                 h.offsetLeft > p.offsetLeft + p.offsetWidth ||
+                 h.offsetTop > p.offsetTop + p.offsetHeight);
+      })()`));
     assertTrue('a5b 纸片本身仍可见（引导阶段不隐藏，Q38）',
       (await njState()).act5.papersIn === true);
     await shot('a5b-3-hand');
