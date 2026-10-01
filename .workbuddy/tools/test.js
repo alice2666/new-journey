@@ -1337,11 +1337,19 @@ const INK_TOP_FN = `(() => {
 
     // Q20：点击 Continue 才转全黑，不自动延时
     assertTrue('a4 Continue 出现后画面尚未全黑（未自动跳转）', !(await hasClass('#blackout', 'in')));
+    // 点 Continue 之前，Goal 卡片当然还在场（这一屏是第四幕的正片）
+    assertEq('a4 点 Continue 前 Goal 卡片仍可见', await effOpacity('#goal01'), 1, 0.02);
+
     await click('#continue');
-    await waitFor(`document.getElementById('blackout').classList.contains('in')`, 6000, '全黑');
     await sleep(900);
+    assertEq('a4 点 Continue 后 Goal 卡片已淡出（不出现「Goal Achieved」这一屏，Q43）',
+      await effOpacity('#goal01'), 0, 0.01);
+    assertEq('a4 点 Continue 后蒙黑底图 shadow 也已撤场（黑幕跑完时无残留灰罩）',
+      await effOpacity('#shadow'), 0, 0.01);
     await shot('a4-3-final-black');
     assertEq('a4 点击 Continue 后画面纯黑', await effOpacity('#blackout'), 1, 0.01);
+    // 纯黑帧里不能再有任何卡片墨迹（黑幕不透明，理应彻底遮住）
+    assertEq('a4 全黑帧中 Goal 卡片不可见（整幕 op 已归零）', await effOpacity('#goal01'), 0, 0.01);
     assertTrue('a4 #act6 / #act6-slot / #act7-slot 预留容器存在（第五幕已升为实际容器 #act5）',
       await evaluate(`(() => {
         const a6 = document.getElementById('act6');

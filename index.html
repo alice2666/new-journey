@@ -298,11 +298,16 @@
      不放 pointer-events：点击仍由 #continue.in.ready 单独开启。 */
   #act4 { opacity: 0; z-index: 4; pointer-events: none; }
   #act4.active { opacity: 1; }
+  /* shadow：第四幕蒙黑底图（把第三幕画面压暗凸显卡片）。
+     ⚠️ v2.14（问题 1 / Q43）：撤场用的 0.4s 必须**短于**黑幕 `#blackout` 的 0.7s 淡入，
+        否则黑幕跑完时它还剩一截半透明灰罩留在屏幕上（实测 600ms 时会残留 0.66）。 */
   #shadow {
     position: absolute; inset: 0; z-index: 90;
     opacity: 0; transition: opacity .6s ease-out;
   }
   #shadow.in { opacity: 1; }
+  /* 撤场态（撤掉 .in 时一并挂上）：把 0.6s 的入场时长压到 0.4s 快速退清 */
+  #shadow.out { opacity: 0; transition: opacity .4s ease-out; }
   /* goal01：水平居中 / 距顶 120 -> left 221 / top 120
      出现方式（用户指定）：**从上到下快速落下**。
      初始整张卡片在画布上方之外（下边缘 699 - 720 = -21 < 0），
@@ -1355,14 +1360,31 @@
       // 结尾是「音乐停 -> 画面黑」，随后的 700ms 渐入与静止黑屏全程无音乐。
       // ⚠️ Q32（v2.12 确认）：停止点保持原样，此后不再起播 —— 第五幕及后续各幕全程静音。
       .then(function () {
-        preloadAct5();                 // 第五幕 9.5MB 与黑幕渐入并行预取（不阻塞）
+        preloadAct5();                 // 第五幕素材与黑幕渐入并行预取（不阻塞）
         stopBGM();
       })
+      /* ⚠️ v2.14（用户问题 1，Q43）：点 Continue 之前必须先把 Goal 卡片整组撤场。
+         病灶：黑幕 700ms 淡入期 `#goal01`(z=95) / `#shadow`(z=90) 都还在 `.in` 状态，
+         黑幕没能完全遮住它们 —— 于是淡完的瞬间视野里仍是「Goal Achieved 卡片」，
+         用户看到的「多出来的一屏」就是它。撤掉后幕内只剩 Continue，黑幕一淡完
+         立即被第五幕户外定格图接管，中途不再出现任何卡片画面。
+         必须在 blackout 挂上 `.in` **之前**执行，故放在 `anim(700, ...)` 的同一帧回调里，
+         与 `blackout.classList.add('in')` 并行 —— 卡片 400ms 淡出，黑幕 700ms 淡入，
+         黑幕跑完时卡片早已归零。删掉 `.in` 即回到 CSS 初态（opacity:0 / translateY(-720)），
+         无需复位，将来若重播第四幕自动从头落一遍。 */
       .then(function () {
         blackout.classList.remove('fast');
-        return anim(700, function () { blackout.classList.add('in'); });
+        return anim(700, function () {
+          goal01.classList.remove('in');
+          // 蒙黑底图也撤（加 `.out` 把退场压到 0.4s，确保黑幕跑完前退清）
+          shadow.classList.remove('in');
+          shadow.classList.add('out');
+          blackout.classList.add('in');
+        });
       });
   }
+
+
 
   /* ================= 第五幕：古城堡（需求 §8） =================
      B1 视频 → B2/B3 户外两句对话 → B4 进室内 + 纸片亮相
