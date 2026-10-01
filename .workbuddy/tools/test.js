@@ -1520,18 +1520,26 @@ const INK_TOP_FN = `(() => {
       })()`));
     // 纸片本轮上移 60 / 左移 10，引导手必须同步跟随（否则指尖会指向旧位置）
     assertEq('a5b 引导手 左边缘 = 791（随纸片同步左移 10）', (await box('#hand5')).left, 791, 0);
-    assertEq('a5b 引导手 顶边 = 536（随纸片同步上移 60）', (await box('#hand5')).top, 536, 0);
+    // v2.14（问题 2）：用户要求引导手在上一版 536 的基础上下移 60 -> 596
+    assertEq('a5b 引导手 顶边 = 596（本轮下移 60）', (await box('#hand5')).top, 596, 0);
     assertEq('a5b 指尖 x 对准纸片横向中心 802.5',
       await evaluate(`(() => {
         const h = document.getElementById('hand5'), p = document.getElementById('btn-papers');
         const hx = h.offsetLeft + 0.07 * h.offsetWidth;
         return +(hx - (p.offsetLeft + p.offsetWidth / 2)).toFixed(1);
       })()`), 0.1, 0.6);
-    assertEq('a5b 指尖 y 停在纸片上沿之上 57px（俯指姿态，不遮纸片）',
+    // v2.14：下移 60 后指尖越过纸片上沿 3px，落在纸片范围内（不再悬在上方）
+    assertEq('a5b 指尖相对纸片上沿的偏移 = +3px（下移 60 后落入纸片）',
       await evaluate(`(() => {
         const h = document.getElementById('hand5'), p = document.getElementById('btn-papers');
-        return p.offsetTop - h.offsetTop;
-      })()`), 57, 0.5);
+        return h.offsetTop - p.offsetTop;
+      })()`), 3, 0.5);
+    assertTrue('a5b 指尖已进入纸片纵向范围（不再悬在纸片上方）',
+      await evaluate(`(() => {
+        const h = document.getElementById('hand5'), p = document.getElementById('btn-papers');
+        const hy = h.offsetTop;   // transform-origin: 7% 0% -> 指尖 y = offsetTop
+        return hy > p.offsetTop && hy < p.offsetTop + p.offsetHeight;
+      })()`));
     assertTrue('a5b 此刻唯一可点目标 = 纸片（cursor:pointer）',
       (await box('#btn-papers')).pointerEvents === 'auto');
     // 问题 3：引导手必须位于纸片图层之上（z-index 严格更大）
