@@ -330,6 +330,11 @@
     pointer-events: none;
   }
   #continue.in { opacity: 1; transform: translateY(0); }
+  /* ⚠️ v2.15（用户问题 1）：撤场态 —— 点 Continue 时把按钮也一起撤掉。
+     病灶：黑幕 `.fast` 入场只有 0.4s，而 `#continue` 走 `#continue.in` 的 0.3s 淡出，
+     黑幕跑完时它还残留约 0.15 —— 于是「Continue 按钮」会在户外定格图／室内图上
+     一闪而过（用户看到的「多出来的一屏」）。加 `.out` 把退场压到 0.15s，跑在黑幕前面。 */
+  #continue.out { opacity: 0; transform: translateY(0); transition: opacity .15s ease-out; }
   /* 第四幕唯一可点击元素（Q20：点击后才转全黑，不自动延时） */
   #continue.in.ready { pointer-events: auto; cursor: pointer; }
   #continue.in.ready:hover  { transform: translateY(0) scale(1.05); }
@@ -1363,22 +1368,23 @@
         preloadAct5();                 // 第五幕素材与黑幕渐入并行预取（不阻塞）
         stopBGM();
       })
-      /* ⚠️ v2.14（用户问题 1，Q43）：点 Continue 之前必须先把 Goal 卡片整组撤场。
-         病灶：黑幕 700ms 淡入期 `#goal01`(z=95) / `#shadow`(z=90) 都还在 `.in` 状态，
-         黑幕没能完全遮住它们 —— 于是淡完的瞬间视野里仍是「Goal Achieved 卡片」，
-         用户看到的「多出来的一屏」就是它。撤掉后幕内只剩 Continue，黑幕一淡完
-         立即被第五幕户外定格图接管，中途不再出现任何卡片画面。
-         必须在 blackout 挂上 `.in` **之前**执行，故放在 `anim(700, ...)` 的同一帧回调里，
-         与 `blackout.classList.add('in')` 并行 —— 卡片 400ms 淡出，黑幕 700ms 淡入，
-         黑幕跑完时卡片早已归零。删掉 `.in` 即回到 CSS 初态（opacity:0 / translateY(-720)），
-         无需复位，将来若重播第四幕自动从头落一遍。 */
+      /* ⚠️ v2.15（用户问题 1，续）：Goal 卡片整组 + Continue 按钮必须与黑幕**同帧**撤场。
+         病灶：黑幕走的是 `.fast`（0.4s 入场），而 `#continue` 若留在 `.in` 上，会走
+         `#continue.in` 的 0.3s 淡出 —— 黑幕跑完时它还残留约 0.15 的不透明度，于是
+         「Continue 按钮」在随后的户外定格图／室内图上**一闪而过**，正是用户看到的多余一屏。
+         三件事同一帧开始、且各自退场都短于黑幕 0.4s：
+             goal01  —— 删 `.in` 回初态，opacity .12s 归零
+             shadow  —— 加 `.out`，0.4s 归零
+             continue—— 加 `.out`，0.15s 归零
+         黑幕一淡完，幕内已无任何残留元素，画面直接交给第五幕。 */
       .then(function () {
-        blackout.classList.remove('fast');
-        return anim(700, function () {
+        blackout.classList.add('fast');        // 0.4s 入场，比三个撤场都长
+        return anim(400, function () {
           goal01.classList.remove('in');
-          // 蒙黑底图也撤（加 `.out` 把退场压到 0.4s，确保黑幕跑完前退清）
           shadow.classList.remove('in');
           shadow.classList.add('out');
+          btnContinue.classList.remove('in');
+          btnContinue.classList.add('out');
           blackout.classList.add('in');
         });
       });

@@ -1341,15 +1341,31 @@ const INK_TOP_FN = `(() => {
     assertEq('a4 点 Continue 前 Goal 卡片仍可见', await effOpacity('#goal01'), 1, 0.02);
 
     await click('#continue');
-    await sleep(900);
+    /* ⚠️ v2.15（用户问题 1）：黑幕走 `.fast`，入场只有 0.4s（原为 0.7s）。
+       所以必须**先**等黑幕到顶、再取「全黑帧」截图与断言；否则 0.4s 一过，
+       第五幕 B1 的 `sleep(500)` 已结束、开始撤黑幕并淡入户外定格图，
+       `#blackout` 的 opacity 就掉下来了。 */
+    await waitFor(`+getComputedStyle(document.getElementById('blackout')).opacity === 1`, 4000, '黑幕到顶（全黑）');
+    await sleep(120);   // 黑幕到顶后仍留在 500ms 停留窗口内，位置稳定
+
     assertEq('a4 点 Continue 后 Goal 卡片已淡出（不出现「Goal Achieved」这一屏，Q43）',
       await effOpacity('#goal01'), 0, 0.01);
     assertEq('a4 点 Continue 后蒙黑底图 shadow 也已撤场（黑幕跑完时无残留灰罩）',
       await effOpacity('#shadow'), 0, 0.01);
+    /* ⚠️ v2.15（用户问题 1）：Continue 按钮也必须撤场。
+       黑幕走 `.fast`（0.4s），而 `#continue.in` 的淡出是 0.3s —— 若按钮留在 `.in` 上，
+       黑幕跑完时它还残留 ~0.15，会在第五幕户外定格图／室内图上一闪而过。 */
+    assertEq('a4 点 Continue 后 Continue 按钮已撤场（不再闪过第五幕画面，v2.15）',
+      await effOpacity('#continue'), 0, 0.01);
+    assertTrue('a4 Continue 按钮已挂 .out（退场压到 0.15s，短于黑幕 0.4s）',
+      await hasClass('#continue', 'out'));
+    assertTrue('a4 Continue 按钮已脱离 .in（不靠 0.3s 淡出）',
+      !(await hasClass('#continue', 'in')));
     await shot('a4-3-final-black');
     assertEq('a4 点击 Continue 后画面纯黑', await effOpacity('#blackout'), 1, 0.01);
     // 纯黑帧里不能再有任何卡片墨迹（黑幕不透明，理应彻底遮住）
     assertEq('a4 全黑帧中 Goal 卡片不可见（整幕 op 已归零）', await effOpacity('#goal01'), 0, 0.01);
+    assertEq('a4 全黑帧中 Continue 按钮不可见（v2.15）', await effOpacity('#continue'), 0, 0.01);
     assertTrue('a4 #act6 / #act6-slot / #act7-slot 预留容器存在（第五幕已升为实际容器 #act5）',
       await evaluate(`(() => {
         const a6 = document.getElementById('act6');
@@ -1394,6 +1410,23 @@ const INK_TOP_FN = `(() => {
       await evaluate(`(()=>{const e=document.getElementById('act5-outdoor');return e.naturalWidth*10000+e.naturalHeight===12000896})()`));
     // 用户诉求核心：绝不能再出现第五幕里的「播放中的视频」画面
     assertEq('a5 该帧无视频在播（#act5 内 video 不可见）', ov.height, 0, 0);
+    /* ⚠️ v2.15（用户问题 1）：户外定格图出现的那一刻，第四幕**残留元素**（Goal 卡片 /
+       蒙黑层 / Continue 按钮）必须全都彻底归零 —— 用户看到「一闪而过」，正是这些残留
+       藏在黑幕的透明度里。注意 `#act4` 容器本身仍是 `.active`（op 1）属正常：它的
+       子元素各自带 `opacity:0` 门控，容器可见 ≠ 内容可见。 */
+    assertEq('a5 户外定格图出现时 Goal 卡片已归零（第四幕残留不得闪过）',
+      await effOpacity('#goal01'), 0, 0.01);
+    assertEq('a5 户外定格图出现时蒙黑层 shadow 已归零',
+      await effOpacity('#shadow'), 0, 0.01);
+    assertEq('a5 户外定格图出现时 Continue 按钮已归零（v2.15）',
+      await effOpacity('#continue'), 0, 0.01);
+    assertTrue('a5 第四幕三个可见元素均已脱离 .in（不靠动画拖尾残留）',
+      await evaluate(`(() => {
+        const g = document.getElementById('goal01');
+        const s = document.getElementById('shadow');
+        const c = document.getElementById('continue');
+        return !g.classList.contains('in') && !s.classList.contains('in') && !c.classList.contains('in');
+      })()`));
     await shot('a5-1-video');
 
     // --- B2 户外对话：chat5a 滑入 ---
