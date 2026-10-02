@@ -1905,22 +1905,33 @@ const INK_TOP_FN = `(() => {
     await sleep(80);
   };
 
+  /* 解掉**指定的一波**（0-based），返回该波解掉的张数。
+     拆出来是为了能在「某一波刚投上底板、尚未被拖走」的窗口里采样它的初始坐标 ——
+     solveAllPieces() 会一口气把 9 张全拖走，之后再也看不到底板原位。 */
+  const solveWaveAt = async (w) => {
+    const pz = await evaluate('window.__nj.puzzle()');
+    const wave = pz.waves[w];
+    if (!wave) throw new Error('没有第 ' + w + ' 波');
+    const base = (await njState()).act6.count;
+    let n = 0;
+    for (const id of wave) {
+      await waitPieceReady(id);
+      const b = await pieceBox(id);
+      if (!b) throw new Error('找不到碎片 ' + id);
+      const g = pz.goalCenter[id];
+      await dragCanvas(b.cx, b.cy, g.x, g.y);
+      n++;
+      await waitFor(`window.__nj.state().act6.count === ${base + n}`, 8000, id + ' 落位（count=' + (base + n) + '）');
+      await sleep(150);
+    }
+    return n;
+  };
+
   // 把 9 张碎片全部拖到目标位；返回完成次数（应等于 9）
   const solveAllPieces = async () => {
     const pz = await evaluate('window.__nj.puzzle()');
     let n = 0;
-    for (const wave of pz.waves) {
-      for (const id of wave) {
-        await waitPieceReady(id);
-        const b = await pieceBox(id);
-        if (!b) throw new Error('找不到碎片 ' + id);
-        const g = pz.goalCenter[id];
-        await dragCanvas(b.cx, b.cy, g.x, g.y);
-        n++;
-        await waitFor(`window.__nj.state().act6.count === ${n}`, 8000, id + ' 落位（count=' + n + '）');
-        await sleep(150);
-      }
-    }
+    for (let w = 0; w < pz.waves.length; w++) n += await solveWaveAt(w);
     return n;
   };
 
@@ -1998,7 +2009,7 @@ const INK_TOP_FN = `(() => {
     'picture-10-02': { w: 210, h: 139, trayX: 917.0, trayY: 677.2, goalX: 178, goalY: 506 },
     'picture-06-03': { w: 238, h: 201, trayX: 903.0, trayY: 48.8, goalX: 581, goalY: 159 },
     'picture-04-03': { w: 206, h: 240, trayX: 919.0, trayY: 328.0, goalX: 178, goalY: 184 },
-    'picture-08-03': { w: 306, h: 213, trayX: 869.0, trayY: 640.2, goalX: 334, goalY: 318 }
+    'picture-08-03': { w: 306, h: 213, trayX: 884.0, trayY: 640.2, goalX: 334, goalY: 318 }
   };
   const PUZZLE_WAVES_EXPECT = [
     ['picture-01-01', 'picture-11-01', 'picture-05-01'],
@@ -2362,7 +2373,31 @@ const INK_TOP_FN = `(() => {
 
     // ---------- ⑨ 三波推进 + 9/9 ----------
     await waitFor(`window.__nj.state().busy === false && window.__nj.state().animLock === false`, 6000, '解锁');
-    const solved = await solveAllPieces();
+
+    /* ⑨-pre 底板初始坐标（本轮修订：08-03 右移 15px）
+       ⚠️ 必须「先解掉前两波 → 第 3 波刚投上底板」时采样：
+          solveAllPieces() 会把 9 张一口气拖走，之后底板原位就再也观察不到了；
+          而 createPiece() 在投放当刻就写好了 style.left/top（淡入 400ms 只是 opacity），
+          所以 waitPieceReady 之后量到的是**真实布局坐标**，不是坐标表里的字面值。 */
+    assertEq('a6b 先解第 1 波（3 张）', await solveWaveAt(0), 3, 0);
+    assertEq('a6b 先解第 2 波（3 张）', await solveWaveAt(1), 3, 0);
+    await waitPieceReady('picture-08-03');
+    const b803 = await pieceBox('picture-08-03');
+    assertTrue('a6b 问题1 第 3 波 08-03 已在底板且可拖',
+      !!b803 && b803.parent === 'piece-layer' && b803.locked === false);
+    assertEq('a6b 问题1 08-03 底板初始 left = 884（居中值 869 再右移 15px）', b803.left, 884.0, 0.6);
+    assertEq('a6b 问题1 08-03 底板初始 top = 640.2（纵向未动）', b803.top, 640.2, 0.6);
+    assertEq('a6b 问题1 08-03 底板初始水平中心 = 1037（= 1022 + 15）', b803.cx, 1037.0, 0.6);
+    assertEq('a6b 问题1 08-03 右缘 = 1190，仍完整落在 1200 画布内',
+      b803.left + b803.width, 1190, 0.6);
+    assertTrue('a6b 问题1 08-03 右移后不与底板右缘贴死（距画布右缘 10px）',
+      b803.left + b803.width < 1200);
+    // 只有 08-03 被右移 —— 同波的另两张必须**仍是居中值**（否则就是改错了地方）
+    assertEq('a6b 问题1 同波 06-03 仍为居中值 903.0（未被误改）', (await pieceBox('picture-06-03')).left, 903.0, 0.6);
+    assertEq('a6b 问题1 同波 04-03 仍为居中值 919.0（未被误改）', (await pieceBox('picture-04-03')).left, 919.0, 0.6);
+    await shot('a6b-0-wave3-tray');
+
+    const solved = 6 + (await solveWaveAt(2));
     assertEq('a6b 三波走完共落位 9 张', solved, 9, 0);
     assertEq('a6b 9/9 后计数 = 9（本幕无最低阈值，必须全满）', (await njState()).act6.count, 9, 0);
     assertEq('a6b 9/9 后底板已空（落位碎片全部离开底板、该位置不补位）',
