@@ -185,9 +185,8 @@
   #blackout.guard { opacity: 0; pointer-events: auto; }
 
   /* ---------- 后续幕预留容器（保持为空） ----------
-     #act6 已由预留位升为第五幕之后的实际容器（见下方「第六幕」段），
-     这里只留 #act6-slot（第五幕以前的旧 #act5-slot）与新的 #act7-slot。 */
-  #act3-slot, #act6-slot, #act7-slot { position: absolute; inset: 0; z-index: 110; pointer-events: none; }
+     原 #act6-slot 已升为第六幕实际容器 #act6（见下方「第六幕」段），这里不再保留同名空位。 */
+  #act3-slot, #act7-slot { position: absolute; inset: 0; z-index: 110; pointer-events: none; }
 
   /* ==================================================================
      第三幕：贴纸定制（z-index 3，位于 #act2(2) 之上、#blackout(100) 之下）
@@ -430,12 +429,226 @@
   #hand5.in { opacity: 1; }
 
   /* ==================================================================
-     第六幕：拼碎纸 / 修复古画（z-index 6，预留；需求 §9.1）
+     第六幕：拼碎纸 / 修复古画（z-index 6；需求 §9）
      ==================================================================
-     玩法尚未由用户描述，此处只立容器与门控，不接入任何元素、不写断言。
-     门控同样必须自带 opacity:0（R19 同源风险）。 */
+     ⚠️ 门控是本幕最高风险点（开发计划 §4.1 / R24 —— D4 的第三次翻版）：
+     #bg-picture(1200x896) 与 #frame-picture(356x896，主体 α=255) 都是
+     「常驻不透明」的全屏 / 半屏图，而 #act6 的 z-index(6) 高于全部前五幕。
+     容器一旦漏写 opacity:0，它们会从页面载入的第一帧起盖住整部 Demo。
+     所以：容器默认 opacity:0 + .active 转可见；激活那一刻 #blackout 仍全黑，
+     瞬时切换即可，不加过渡更安全（与 #act3 / #act4 / #act5 同做法）。
+
+     幕内层级一律照需求 §10.1：
+       1 木桌 < 2 右侧底板 < 3 画框底罩 < 4 静态底 < 10 已落位碎片
+       < 30 完成态整图 < 40 两钮 < 41 参考图 < 60 拖拽层
+       < 90 蒙黑 < 95 Goal 2 < 96 Continue
+     ⚠️ 四条例外关系别写反：
+       ① 底板(2) 必须**低于**碎片(10) —— 底板主体不透明，写反了碎片会被整个盖住，
+          画面表现为「碎片不见了、只剩一块空底板」；
+       ② picture-line(3) 必须**低于**静态底(4) —— 它是平均 35% 的深色罩，
+          写反了拼好的画会被整体罩暗；
+       ③ 拖拽层(60) 必须**高于**底板(2) / 碎片(10) / 整图(30) ——
+          碎片要从底板上被「拿起来」并跨过木桌区飞向画框；
+       ④ 蒙黑层(90) 必须**高于**幕内全部画面元素（整图 30 / 两钮 40 / 参考图 41）——
+          Q55 取消了「UI 淡出」这条退路后，层级成了唯一的视觉控制手段，
+          写反会变成「古画被压暗、两个彩色圆钮反而亮着」，与需求效果正好相反。 */
   #act6 { opacity: 0; z-index: 6; pointer-events: none; }
   #act6.active { opacity: 1; pointer-events: auto; }
+
+  /* 第六幕的按钮组（btn-again / btn-picture / continue6）：统一以中心缩放 */
+  .btn6 { transform-origin: center center; }
+
+  /* ---------- C1：木桌 + 画框底罩 + 静态底 ---------- */
+  /* 木桌背景是本幕「一开始就在」的常驻底（幕内 z 1）。
+     它的出场**完全由黑幕淡出完成**，刻意不像第五幕的 #bg-inside 那样自带淡入 ——
+     否则黑幕淡完之后画面还是空的，再等 300ms 才浮出木桌（照抄第五幕会踩这个坑）。 */
+  #bg-picture {
+    position: absolute; left: 0; top: 0; width: 1200px; height: 896px;
+    z-index: 1;
+  }
+  /* 画框底罩 + 描边（646x522 = 沿 640x517 的整图左/上/右/下各外扩 3px）：
+     一层平均 35% 的深色罩，必须垫在静态底**之下**（见上面例外关系 ②）。 */
+  #picture-line {
+    position: absolute; left: 175px; top: 124px; width: 646px; height: 522px;
+    z-index: 3;
+    opacity: 0;
+    transition: opacity .3s ease-out;
+  }
+  #picture-line.in { opacity: 1; }
+  /* 静态底 = 整图**减去**这 9 张碎片后剩下的部分（实测与拼合结果严丝合缝）。
+     piece-many 与 all-picture 在素材里是逐像素同源的 640x517 图，
+     Q47 定案：两者**必须同槽**，统一取 178 / 126。 */
+  #piece-many {
+    position: absolute; left: 178px; top: 126px; width: 640px; height: 517px;
+    z-index: 4;
+    opacity: 0;
+    transition: opacity .3s ease-out;
+  }
+  #piece-many.in { opacity: 1; }
+
+  /* ---------- C2：右侧碎片底板 + 两个圆钮 + 参考缩略图 ---------- */
+  /* 底板 356x896 盖住木桌右半边（x 844-1200），主体完全不透明 ——
+     所以「碎片必须在它之上」（碎片 10 > 底板 2）是硬要求（见例外关系 ①）。 */
+  #frame-picture {
+    position: absolute; left: 844px; top: 0; width: 356px; height: 896px;
+    z-index: 2;
+    transform: translateX(356px);      /* 初始完全在画布右侧之外：844 + 356 = 1200 */
+    transition: transform .6s ease-out;
+  }
+  #frame-picture.in { transform: translateX(0); }
+
+  /* 两个圆钮：btn-again 在左上（52/15）、btn-picture 在左下（52/703），
+     均**自左向右**滑入 500ms（btn-picture 错峰 100ms）。
+     ⚠️ 初始 translateX(-120px) 只把左边缘推到 -68，右边缘仍在画布内 35px，
+        所以**必须**同时用 opacity:0 藏住 —— 只写 transform 会露出一条边。 */
+  #btn-again, #btn-picture {
+    position: absolute; left: 52px;
+    width: 103px; height: 113px;
+    z-index: 40;
+    opacity: 0;
+    transform: translateX(-120px);
+    transition: opacity .5s ease-out, transform .5s ease-out, filter .2s ease-out;
+    pointer-events: none;
+  }
+  #btn-again  { top: 15px; }
+  #btn-picture { top: 703px; }
+  #btn-again.in, #btn-picture.in {
+    opacity: 1; transform: translateX(0);
+    pointer-events: auto; cursor: pointer;
+  }
+  /* 入场动画跑完后切成快速过渡，hover 才不迟钝 */
+  #btn-again.in.settled, #btn-picture.in.settled {
+    transition: transform .15s ease-out, opacity .2s ease-out, filter .2s ease-out;
+  }
+  #btn-again.in.settled:hover, #btn-picture.in.settled:hover { transform: scale(1.06); filter: brightness(1.06); }
+  #btn-again.in.settled:active, #btn-picture.in.settled:active { transform: scale(.95); }
+  /* ⚠️ v2.20 · Q56：C5 蒙黑一出现，两钮「视觉保留（被压暗）、功能不可点击」。
+     必须放在上面 .in 之后 —— 同特异性（1 个 id + 1 个 class），靠声明顺序取胜。
+     ⚠️ 绝不可改成给 #act6 整幕设 pointer-events:none：C3 的拖拽与 Continue
+        都依赖真实点击（这是与第四幕「整幕屏蔽、只放行 #continue」的关键差异）。 */
+  #btn-again.dead, #btn-picture.dead { pointer-events: none; cursor: default; }
+
+  /* 参考缩略图（256x206）：画框**下方**的木桌面上，与拼图区不重叠。
+     pointer-events:none 写死 —— 否则它会挡住底板上的碎片，拖不起来。 */
+  #small-picture {
+    position: absolute; left: 180px; top: 666px; width: 256px; height: 206px;
+    z-index: 41;
+    opacity: 0;
+    transition: opacity .3s ease-out;
+    pointer-events: none;
+  }
+  #small-picture.in { opacity: 1; }
+
+  /* ---------- C3：已落位碎片层 + 拖拽层 ---------- */
+  /* 两层都写成「铺满画布的空定位容器」：碎片于是以**画布坐标**为 left/top，
+     开发计划 §5.5 的数值可以直接用；「拿起 = 换父节点」时坐标语义也不变。 */
+  #piece-layer {
+    position: absolute; left: 0; top: 0; width: 1200px; height: 896px;
+    z-index: 10; pointer-events: none;
+  }
+  #piece-drag {
+    position: absolute; left: 0; top: 0; width: 1200px; height: 896px;
+    z-index: 60; pointer-events: none;
+  }
+  /* 碎片（9 张，由 JS 动态创建）：
+     · 只做「淡入」与「拿起时放大到 1.05」两种过渡 —— **绝不做旋转 / 落定缩放**
+       （9 张是 all-picture 的 1:1 精确同位裁剪，转了就不严丝合缝，与第三幕贴纸正好相反）；
+     · left/top 的过渡**只在吸附 / 飞回时临时挂上**（inline），跟随期间必须是 none，
+       否则每一帧都追赶，画面拖影（第三幕跟随踩过同一个坑）。 */
+  #act6 .piece {
+    position: absolute;
+    opacity: 0;
+    transform: scale(1);
+    transition: opacity .4s ease-out, transform .15s ease-out;
+    pointer-events: none;
+  }
+  #act6 .piece.in { opacity: 1; pointer-events: auto; cursor: grab; }
+  #act6 .piece.lift {
+    pointer-events: none;
+    cursor: grabbing;
+    transform: scale(1.05);
+    filter: drop-shadow(0 10px 20px rgba(0, 0, 0, .45));
+  }
+
+  /* ---------- C4：完成态整图 + 循环发光 ---------- */
+  /* 9/9 之后淡入，盖在拼合结果之上 —— 拼合残差（全图平均 0.395/255，集中在碎片边缘
+     的抗锯齿过渡带）被这一盖彻底抹平，画面上就是一张干净完整的古画。 */
+  #all-picture {
+    position: absolute; left: 178px; top: 126px; width: 640px; height: 517px;
+    z-index: 30;
+    opacity: 0;
+    transition: opacity .4s ease-out;
+    pointer-events: none;
+  }
+  #all-picture.in { opacity: 1; }
+  /* 发光只能由 CSS 实现（素材里没有「发光版」整图，本 Demo 零依赖、不新增素材）。
+     ⚠️ v2.19 · Q54：9/9 之后**常驻不熄灭**，进入 C5 也**不摘除** ——
+        它只是随后被 #shadow6（70% 蒙黑）整体压暗。 */
+  @keyframes picGlow {
+    0%, 100% { filter: drop-shadow(0 0 6px rgba(255, 240, 180, .55)) brightness(1); }
+    50%      { filter: drop-shadow(0 0 18px rgba(255, 240, 180, .95)) brightness(1.12); }
+  }
+  #all-picture.glow { animation: picGlow 1.6s ease-in-out infinite; }
+
+  /* ---------- C5：蒙黑 + 第二张 Goal 卡 + Continue（整套复用第四幕） ----------
+     ⚠️ 三件必须在 #act6 内**新建**，绝不可复用 #act4 的 #shadow / #goal01 / #continue ——
+        #act4(z=4) **低于** #act6(z=6)，它内部的 90/95/96 层遮不住本幕画面。
+     ⚠️ 三件**各自**必须自带 opacity:0 门控：幕级 .active 从 C1 起就常驻、兜不住它们。
+        尤其 #shadow6 是 1200x896、平均 α≈70% 的整幅蒙黑图，漏门控会让第六幕
+        从黑幕淡出的第一帧起就是灰的 —— 而玩家只会说「画面怎么是灰的」，极难归因。 */
+  #shadow6 {
+    position: absolute; inset: 0; z-index: 90;
+    opacity: 0;
+    transition: opacity .6s ease-out;
+    /* ⚠️ 必须显式关掉命中测试：opacity:0 **不阻止**元素接收指针事件。
+       本幕与第四幕的关键差异就在这里 —— 第四幕的 #shadow 躲在 `#act4`（整幕
+       pointer-events:none）里，天然不会被点到；而本幕的 #act6 **必须保持可点**
+       （C3 拖拽与 Continue 都要真实点击），于是这层 1200x896、z=90 的蒙黑图
+       会在 C1~C4 期间**吞掉全幕的每一次按下**，表现为「碎片怎么拖都拖不动、
+       两个圆钮也点不动」，而所有坐标 / 类名 / opacity 断言却全是绿的。 */
+    pointer-events: none;
+  }
+  #shadow6.in { opacity: 1; }
+  /* 撤场态（撤掉 .in 时一并挂上）：把 0.6s 的入场时长压到 0.4s 快速退清（D8） */
+  #shadow6.out { opacity: 0; transition: opacity .4s ease-out; }
+
+  /* goal02：与 goal01 同模板同尺寸，坐标一并沿用 221 / 120（Q52「复用第四幕位置」）。
+     动作同样是「从上到下快速落下」：初始整张在画布上方之外
+     （下边缘 699 - 720 = -21 < 0），opacity 只用 120ms 快速点亮 ——
+     保证卡片一进入画布就已可见，而不是落到位才浮现。 */
+  #goal02 {
+    position: absolute; left: 221px; top: 120px; width: 758px; height: 579px;
+    z-index: 95;
+    opacity: 0;
+    transform: translateY(-720px);
+    transition: transform .38s cubic-bezier(.55, 0, .85, .35), opacity .12s ease-out;
+    /* 同 #shadow6：opacity:0 不阻止命中。这张 758x579 的卡片在画布上方之外时无所谓，
+       但它一落下来就正好压住左侧画框区（178/126~818/643）—— 若不禁用命中，
+       C5 期间以及任何卡片“已在位”的时刻都会吞掉本该落到碎片上的按下。 */
+    pointer-events: none;
+  }
+  #goal02.in { opacity: 1; transform: translateY(0); }
+
+  /* Continue：同样沿用第四幕坐标 467.5 / 770（Q52）。
+     滑入 500ms；**滑完**才由 JS 加 .ready 放开点击。 */
+  #continue6 {
+    position: absolute; left: 467.5px; top: 770px; width: 265px; height: 31px;
+    z-index: 96;
+    opacity: 0;
+    transform: translateY(120px);      /* 初始完全在画布下沿之外：770+120 = 890，下边缘 921 > 896 */
+    transition: transform .5s ease-out, opacity .3s ease-out;
+    pointer-events: none;
+  }
+  #continue6.in { opacity: 1; transform: translateY(0); }
+  /* 撤场态：黑幕走 .fast（0.4s 入场），而 #continue6.in 的淡出是 0.3s ——
+     若点击后把按钮留在 .in 上，黑幕跑完时它还残留约 0.15。加 .out 压到 0.15s，
+     跑在黑幕前面（D8 第三次实例）。 */
+  #continue6.out { opacity: 0; transform: translateY(0); transition: opacity .15s ease-out; }
+  /* C5 期间唯一可点击元素 */
+  #continue6.in.ready { pointer-events: auto; cursor: pointer; }
+  #continue6.in.ready:hover  { transform: translateY(0) scale(1.05); }
+  #continue6.in.ready:active { transform: translateY(0) scale(.95); }
+  #continue6.in.settled { transition: transform .15s ease-out, opacity .2s ease-out; }
 
   /* ---------- 启动失败兜底提示 ----------
      本页所有元素默认 opacity:0，靠 JS 加 .in 才显示。
@@ -604,15 +817,53 @@
       <img id="btn-go5b" src="assets/screen2/btn-go.png" alt="GO">
     </section>
 
-    <!-- ========== 第六幕：拼碎纸 / 修复古画（预留，玩法待用户描述） ========== -->
-    <section id="act6" class="scene"></section>
+    <!-- ========== 第六幕：拼碎纸 / 修复古画（z-index 6） ==========
+         幕内层级（需求 §10.1）：
+           1 木桌 < 2 右侧底板 < 3 画框底罩 < 4 静态底 < 10 已落位碎片
+           < 30 完成态整图 < 40 两钮 < 41 参考图 < 60 拖拽层
+           < 90 蒙黑 < 95 Goal 2 < 96 Continue -->
+    <section id="act6" class="scene">
+      <!-- C1：木桌背景（常驻底，靠黑幕淡出露出，自身不带 .in） -->
+      <img id="bg-picture" src="assets/screen6/bg-picture.png" alt="">
+      <!-- C2：右侧碎片底板（不透明，x 844-1200；碎片出现在它**之上**） -->
+      <img id="frame-picture" src="assets/screen6/frame-picture.png" alt="">
+      <!-- C1：画框底罩 + 描边（必须垫在静态底**之下**，否则拼好的画被罩暗） -->
+      <img id="picture-line" src="assets/screen6/picture-line.png" alt="">
+      <!-- C1：静态底 = 整图减去 9 张碎片的部分（与 all-picture 同槽 178/126，Q47） -->
+      <img id="piece-many" src="assets/screen6/piece-many.png" alt="">
+
+      <!-- C3：已落位碎片挂这里（9 张碎片由 JS 动态创建）。
+           这是铺满画布的空定位容器，碎片的 left/top 因此就是画布坐标。 -->
+      <div id="piece-layer"></div>
+
+      <!-- C4：9/9 后淡入的完成态整图（盖住拼合结果、抹平边缘残差）+ 循环发光 -->
+      <img id="all-picture" src="assets/screen6/all-picture.png" alt="">
+
+      <!-- C2：两个圆钮 —— btn-again 左上(52/15)、btn-picture 左下(52/703) -->
+      <img id="btn-again" class="btn6" src="assets/screen6/btn-again.png" alt="Restart">
+      <img id="btn-picture" class="btn6" src="assets/screen6/btn-picture.png" alt="Show reference">
+
+      <!-- C2：参考缩略图（自动 2s / 手动 3s；pointer-events:none，不挡碎片） -->
+      <img id="small-picture" src="assets/screen6/small-picture.png" alt="">
+
+      <!-- C3：拖拽层 —— 被拿起的碎片挂这里（60，必须高于底板 2 / 碎片 10 / 整图 30） -->
+      <div id="piece-drag"></div>
+
+      <!-- ===== C5 收尾三件（Q52 / Q55 / Q56） =====
+           ⚠️ 必须在 #act6 内**新建**，绝不可复用 #act4 的 #shadow / #goal01 / #continue：
+              #act4 的 z=4 低于 #act6 的 z=6，它内部的 90/95/96 层遮不住本幕画面。
+           ⚠️ 三件**各自**带 opacity:0 门控 —— 幕级 .active 从 C1 起就常驻，兜不住它们。
+           src 指向与第四幕相同的 URL，浏览器缓存复用、不产生额外请求。 -->
+      <img id="shadow6" src="assets/screen4/shadow.png" alt="">
+      <img id="goal02" src="assets/screen7/goal02-picture.png" alt="Goal Achieved">
+      <img id="continue6" class="btn6" src="assets/screen4/Continue.png" alt="Continue">
+    </section>
 
     <!-- ========== 遮黑层 ========== -->
     <div id="blackout"></div>
 
     <!-- ========== 后续幕预留位（保持为空） ========== -->
     <div id="act3-slot"></div>
-    <div id="act6-slot"></div>
     <div id="act7-slot"></div>
 
   </div>
@@ -777,6 +1028,61 @@
     'assets/screen5/btn-papers.png'
   ];
 
+  /* ================= 第六幕：拼碎纸 / 修复古画（需求 §9） =================
+     3 波 × 3 张，顺序照需求 §9.5.1（文件名后缀 -01 / -02 / -03 恰对应波次）。
+     每张碎片的坐标**直接取开发计划 §5.5 的两张表**，不再二次换算：
+       trayX / trayY = 右侧底板上的初始位置（C 表；Q48 = 底板内纵向 3 等分居中
+                        + 每张水平居中于底板中心 x = 1022，原尺寸摆放不缩放）
+       goalX / goalY = 拖到左侧画框后的目标位置（B 表；像素级邻域精扫最优值，
+                        9 张与 all-picture 的同位平均绝对差全部为 0.00，仅 08-03 为 0.48）
+     「目标中心」= (goalX + w/2, goalY + h/2)，供命中判定与断言使用 ——
+     9 个目标中心**两两最近 68.0px**（03-02 ↔ 06-03），容差 30px 不到其一半。 */
+  var PUZZLE_DIR = 'assets/screen6/';
+  var PUZZLE_WAVES = [
+    ['picture-01-01', 'picture-11-01', 'picture-05-01'],   // 第 1 波
+    ['picture-03-02', 'picture-09-02', 'picture-10-02'],   // 第 2 波
+    ['picture-06-03', 'picture-04-03', 'picture-08-03']    // 第 3 波
+  ];
+  var PUZZLE_PIECES = {
+    'picture-01-01': { w: 241, h: 128, trayX: 901.5, trayY:  85.3, goalX: 178, goalY: 127 },
+    'picture-11-01': { w: 291, h: 158, trayX: 876.5, trayY: 369.0, goalX: 334, goalY: 485 },
+    'picture-05-01': { w: 256, h: 134, trayX: 894.0, trayY: 679.7, goalX: 438, goalY: 255 },
+    'picture-03-02': { w: 241, h: 131, trayX: 901.5, trayY:  83.8, goalX: 577, goalY: 126 },
+    'picture-09-02': { w: 192, h: 207, trayX: 926.0, trayY: 344.5, goalX: 626, goalY: 311 },
+    'picture-10-02': { w: 210, h: 139, trayX: 917.0, trayY: 677.2, goalX: 178, goalY: 506 },
+    'picture-06-03': { w: 238, h: 201, trayX: 903.0, trayY:  48.8, goalX: 581, goalY: 159 },
+    'picture-04-03': { w: 206, h: 240, trayX: 919.0, trayY: 328.0, goalX: 178, goalY: 184 },
+    'picture-08-03': { w: 306, h: 213, trayX: 869.0, trayY: 640.2, goalX: 334, goalY: 318 }
+  };
+  var HIT_TOLERANCE = 30;      // 命中容差：碎片中心 ↔ 目标中心 的距离 ≤ 30px（需求 §9.5.3）
+  var SNAP_MS       = 220;     // 命中吸附（需求给 180–250ms，取中值）
+  var FLY_BACK_MS   = 250;     // 未命中飞回底板原位（需求 §9.5.3）
+  /* ⚠️ 下面两个时长**不同是用户明确要的效果**，不要「顺手统一」（需求 §9.4 / Q50 / Q51）：
+       · AUTO_HINT_MS   = C2 末尾「自动」那一次（v2.17 · Q50 由 3s 改为此值）
+       · MANUAL_HINT_MS = 点 btn-picture「手动」那一次（v2.20 · Q51 保持 3s） */
+  var AUTO_HINT_MS   = 2000;
+  var MANUAL_HINT_MS = 3000;
+  /* Q45：'act6' = 重置**本幕**（清空落位碎片、回第 1 波；背景 / 底板 / 按钮 / 参考图都不重播）。
+     日后若要改为「整局重开（回第一幕 START）」，只改这一个值。 */
+  var RESET_SCOPE = 'act6';
+
+  /* 第六幕素材（screen6/ 17 件 + screen7/ 1 件，≈ 3.1MB）：
+     在第五幕 B8 收尾的 500ms 转场里并行预取，不 await（§6.26）。
+     screen4 的 shadow.png / Continue.png 第四幕已加载（src 同 URL，浏览器按缓存复用），不重复预取。 */
+  var ACT6_IMAGES = [
+    'assets/screen6/bg-picture.png',
+    'assets/screen6/frame-picture.png',
+    'assets/screen6/picture-line.png',
+    'assets/screen6/piece-many.png',
+    'assets/screen6/all-picture.png',
+    'assets/screen6/btn-again.png',
+    'assets/screen6/btn-picture.png',
+    'assets/screen6/small-picture.png',
+    'assets/screen7/goal02-picture.png'
+  ].concat(PUZZLE_WAVES[0].concat(PUZZLE_WAVES[1], PUZZLE_WAVES[2]).map(function (id) {
+    return PUZZLE_DIR + id + '.png';
+  }));
+
   /* ================= DOM ================= */
   var stage      = document.getElementById('stage');
 
@@ -819,6 +1125,21 @@
   var chat5bText  = chat5b.querySelector('.chat-text');
   var btnGo5b     = document.getElementById('btn-go5b');
 
+  var act6         = document.getElementById('act6');
+  var bgPicture    = document.getElementById('bg-picture');
+  var framePicture = document.getElementById('frame-picture');
+  var pictureLine  = document.getElementById('picture-line');
+  var pieceMany    = document.getElementById('piece-many');
+  var pieceLayer   = document.getElementById('piece-layer');
+  var pieceDrag    = document.getElementById('piece-drag');
+  var allPicture   = document.getElementById('all-picture');
+  var btnAgain     = document.getElementById('btn-again');
+  var btnPicture   = document.getElementById('btn-picture');
+  var smallPicture = document.getElementById('small-picture');
+  var shadow6      = document.getElementById('shadow6');
+  var goal02       = document.getElementById('goal02');
+  var btnContinue6 = document.getElementById('continue6');
+
   var blackout   = document.getElementById('blackout');
 
   /* 调色板 12 张贴纸：槽位坐标的唯一来源是 HTML 的内联样式，避免两处各写一份 */
@@ -847,8 +1168,23 @@
   var rafPending = false;
   var preload34 = null;
   var preload5 = null;
+  var preload6 = null;
   var act5Done = false;      // 第五幕是否已开始，防重复触发
   var rotOverride = null;    // 测试钩子：固定落定旋转角
+
+  /* ---- 第六幕专有状态（开发计划 §6.26；在 busy / animLock 两层之上补三个） ---- */
+  var puzzleEls    = {};     // id -> <img>，9 张碎片（JS 动态创建）
+  var puzzleCount  = 0;      // 已落位碎片数 0 → 9（本幕**没有**最低数量阈值，必须 9/9）
+  var puzzleWave   = 0;      // 当前波次 0 / 1 / 2
+  var puzzleGen    = 0;      // 波次调度代次令牌：重来后作废在途的「下一波」延迟
+  var puzzleLive   = false;  // 玩法循环是否进行中
+  var puzzleResolve = null;  // 9/9 时 resolve（事件驱动，不轮询）
+  var lockedIds    = {};     // 已落位碎片标记（命中后置 true，pointerdown 直接 return）
+  var dragging     = null;   // 正在拖拽的碎片 { id, el, offX, offY, x, y }
+  var dragPending  = false;  // 拖拽跟随的 rAF 节流标记（与第三幕的 rafPending 分开，互不干扰）
+  var hintTimer    = null;   // 手动参考图的 3s 计时器（重复点击 clearTimeout 后重开）
+  var act6Started  = false;
+  var act6Done     = false;
 
   /* ================= 工具 ================= */
   function sleep(ms) {
@@ -1033,6 +1369,13 @@
       preload5 = Promise.all(ACT5_IMAGES.map(loadImage));
     }
     return preload5;
+  }
+
+  // 第六幕素材（screen6/ + screen7/，≈ 3.1MB）：在第五幕 B8 收尾的 500ms 转场里并行预取。
+  // 同样「并行不阻塞」—— 不 await，也不参与任何流程的等待。
+  function preloadAct6() {
+    if (!preload6) preload6 = Promise.all(ACT6_IMAGES.map(loadImage));
+    return preload6;
   }
 
   /* ================= 打字机 ================= */
@@ -1498,9 +1841,372 @@
         return anim(700, function () { blackout.classList.add('in'); });
       })
 
-      // B8 末 黑幕停留 500ms 作为转场（并行预加载第六幕素材），衔接第六幕
-      //     第六幕玩法待用户描述，此处只留转场钩子，不接入任何元素。
-      .then(function () { return sleep(500); });
+      // B8 末 黑幕停留 500ms 作为转场，衔接第六幕。
+      //     第六幕素材（screen6/ 17 件 + screen7/ 1 件，≈ 3.1MB）就在这里并行预取，
+      //     不 await —— 与 preloadAct34() / preloadAct5() 一样的「并行不阻塞」写法。
+      .then(function () { preloadAct6(); return sleep(500); });
+  }
+
+  /* ================= 第六幕：拼碎纸 / 修复古画（需求 §9） =================
+     C1 入场 → C2 右侧 UI → C3 拼图玩法（全片首次拖拽）→ C4 完成发光 → C5 收尾
+
+     ⚠️ 与第三幕贴纸的四处关键差异（**不要照搬第三幕的实现**）：
+        · 交互：第三幕是「点击选中 → 点击落位」；本幕是「按住拖拽 → 松开判定」
+          （需求 §9.10 明令：两者**不共用绑定函数**，可复用的只有 rAF 节流写法与 toStage()）
+        · 落点：第三幕是**自由落点**（只看整张贴纸在不在框内）；本幕**只有一个正确位置**
+        · 旋转：第三幕落定随机旋转 ±10°；本幕**绝不旋转、绝不缩放**
+          （9 张是 1:1 精确同位裁剪，转了就不严丝合缝）
+        · 判据：第三幕比「贴纸中心落在内缩后的框内」；本幕比「碎片中心 ↔ 目标中心的距离」
+
+     ⚠️ C5 收尾整套复用第四幕 runAct4() 末段，但有**三处必须显式「删掉」**：
+        · 不写 `#act3.ui-out` 那一步 —— Q55：本幕幕内**一律保留、不做淡出**，
+          只被 70% 蒙黑整体压暗（与第四幕做法**正好相反**）
+        · 不写 stopBGM() —— BGM 早在第四幕末点击 Continue 时就停了，本幕**全程静音**（Q32）
+        · 不给 #act6 整幕设 pointer-events:none —— 本幕的 Continue 乃至 C3 拖拽都依赖
+          真实点击，只能**逐个**给两个圆钮加 .dead（Q56）
+     ⚠️ 本幕不触碰任何 bgm 代码（需求 §3.5 / Q32）。 */
+
+  function pieceEl(id) { return puzzleEls[id] || null; }
+
+  /* 命中判定的**纯函数**：给定「碎片中心」的画布坐标，问是否落在该碎片的目标容差内。
+     与「碎片是否完整落在画框内」无关 —— 那是第三幕贴纸的口径（Q25 的 inBody()），
+     本幕**不要照搬**。拆成纯函数是为了能脱离画面单测（喂坐标 → 期望命中 / 飞回）。 */
+  function hitTest(id, cx, cy) {
+    var m = PUZZLE_PIECES[id];
+    if (!m) return false;
+    var gx = m.goalX + m.w / 2, gy = m.goalY + m.h / 2;
+    var dx = cx - gx, dy = cy - gy;
+    return Math.sqrt(dx * dx + dy * dy) <= HIT_TOLERANCE;
+  }
+
+  // 按碎片**当前**的 left/top 判定（当前中心 = left/top + 半宽/半高）
+  function judge(id) {
+    var el = puzzleEls[id];
+    var m = PUZZLE_PIECES[id];
+    if (!el || !m) return false;
+    var L = parseFloat(el.style.left) || 0, T = parseFloat(el.style.top) || 0;
+    return hitTest(id, L + m.w / 2, T + m.h / 2);
+  }
+
+  // 创建一张碎片：初始挂在 #piece-layer（z 10）、摆在底板初始坐标上、opacity 0
+  function createPiece(id) {
+    var m = PUZZLE_PIECES[id];
+    var el = document.createElement('img');
+    el.src = PUZZLE_DIR + id + '.png';
+    el.alt = '';
+    el.className = 'piece';
+    el.setAttribute('data-piece', id);
+    el.style.left = m.trayX + 'px';
+    el.style.top = m.trayY + 'px';
+    el.style.width = m.w + 'px';      // 写死尺寸：不必等图解码，布局坐标即确定
+    el.style.height = m.h + 'px';
+    el.addEventListener('pointerdown', onPieceDown(id));
+    pieceLayer.appendChild(el);
+    puzzleEls[id] = el;
+    return el;
+  }
+
+  // 分波投放：同一波 3 张**同时**出现在底板，淡入 400ms、逐张错峰 40ms（沿用第三幕贴纸节奏）
+  function dropWave(i) {
+    var ids = PUZZLE_WAVES[i];
+    var k;
+    for (k = 0; k < ids.length; k++) { if (!puzzleEls[ids[k]]) createPiece(ids[k]); }
+    for (k = 0; k < ids.length; k++) {
+      (function (id, kk) {
+        setTimeout(function () {
+          var el = puzzleEls[id];
+          if (el) el.classList.add('in');
+        }, 40 * kk);
+      })(ids[k], k);
+    }
+    return anim(400 + 40 * (ids.length - 1));   // 覆盖波内最晚一张的淡入
+  }
+
+  function waveComplete(i) {
+    var ids = PUZZLE_WAVES[i];
+    for (var k = 0; k < ids.length; k++) { if (!lockedIds[ids[k]]) return false; }
+    return true;
+  }
+
+  /* 每次落位后检查推进：
+     当波 3 张全部落位 → 停顿 400ms → 投下一波；第 3 波全落位 → 9/9 完成。 */
+  function advanceAfterLock() {
+    if (!puzzleLive || !waveComplete(puzzleWave)) return;
+    if (puzzleWave < PUZZLE_WAVES.length - 1) {
+      puzzleWave++;
+      var g = puzzleGen, next = puzzleWave;
+      sleep(400).then(function () {
+        if (g !== puzzleGen || !puzzleLive) return;   // 期间被「重来」作废
+        dropWave(next);
+      });
+    } else {
+      puzzleLive = false;
+      var r = puzzleResolve;
+      puzzleResolve = null;
+      if (r) r();
+    }
+  }
+
+  /* ① 拿起（pointerdown，绑在**碎片元素**上）：
+     从底板进入拖拽层（z 60），放大 1.05 + 投影、cursor: grabbing。 */
+  function onPieceDown(id) {
+    return function (e) {
+      if (busy || animLock || dragging || lockedIds[id] || !puzzleLive || act6Done) return;
+      var el = puzzleEls[id];
+      if (!el) return;
+      e.preventDefault();
+      var p = toStage(e);                       // ⚠️ 必须走 toStage（#stage 带 scale）
+      var L = parseFloat(el.style.left) || 0, T = parseFloat(el.style.top) || 0;
+      dragging = { id: id, el: el, offX: p.x - L, offY: p.y - T, x: p.x, y: p.y };
+      el.style.transition = 'none';             // 跟随期间禁止过渡，否则每帧都追赶、画面拖影
+      el.classList.add('lift');
+      pieceDrag.appendChild(el);                // 换父节点：两层都是 0/0 铺满画布，坐标语义不变
+      playSound();                              // 拿起（需求 §9.10）
+      // 指针捕获挂在 #stage 上：拖出画布再松开也能收到 pointerup，
+      // 否则 dragging 会永远非空、整幕再也拖不动（旧引擎不支持时静默跳过）。
+      try { stage.setPointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+    };
+  }
+
+  // ② 跟随：pointermove 只记录坐标，真正改样式交给 rAF 节流
+  function flushDrag() {
+    dragPending = false;
+    if (!dragging) return;
+    var el = dragging.el;
+    el.style.left = (dragging.x - dragging.offX) + 'px';
+    el.style.top  = (dragging.y - dragging.offY) + 'px';
+  }
+
+  function pointerInStage(e) {
+    var r = stage.getBoundingClientRect();
+    return e.clientX >= r.left && e.clientX <= r.right &&
+           e.clientY >= r.top  && e.clientY <= r.bottom;
+  }
+
+  /* ③ 松开（pointerup / pointercancel，绑在 **#stage** 上，不绑 document）：
+     松手瞬间先按真实落点定稿位置，再进判定。 */
+  function onStagePointerUp(e) {
+    if (!dragging) return;
+    var d = dragging;
+    dragging = null;
+    try { stage.releasePointerCapture(e.pointerId); } catch (err) { /* ignore */ }
+
+    var inside = pointerInStage(e);
+    if (inside) {
+      var p = toStage(e);
+      d.x = p.x;
+      d.y = p.y;
+      d.el.style.left = (d.x - d.offX) + 'px';
+      d.el.style.top  = (d.y - d.offY) + 'px';
+    }
+    // 指针移出画布再松开 → 一律视为未命中（需求 §9.5.2 第 5 条）
+    if (inside && judge(d.id)) snapPiece(d.id);
+    else flyBack(d.id);
+  }
+
+  // ④ 命中：吸附到该碎片的**精确目标坐标**（不是「就近对齐」）→ 锁定 → 计数 +1
+  function snapPiece(id) {
+    var m = PUZZLE_PIECES[id], el = puzzleEls[id];
+    animLock = true;
+    el.classList.remove('lift');
+    // 吸附允许 left/top 过渡（跟随期间被关掉，这里临时挂上，过渡结束后清掉）
+    el.style.transition = 'left ' + SNAP_MS + 'ms ease-out, top ' + SNAP_MS + 'ms ease-out, ' +
+                          'transform .15s ease-out, opacity .4s ease-out';
+    el.style.left = m.goalX + 'px';
+    el.style.top  = m.goalY + 'px';
+    pieceLayer.appendChild(el);              // 回已落位层（z 10）
+    playSound();
+    lockedIds[id] = true;
+    puzzleCount++;
+    setTimeout(function () {
+      el.style.transition = '';
+      animLock = false;
+      advanceAfterLock();
+    }, SNAP_MS);
+  }
+
+  // ⑤ 未命中：飞回底板原位 → 该碎片**仍可再拖、不计数**
+  function flyBack(id) {
+    var m = PUZZLE_PIECES[id], el = puzzleEls[id];
+    animLock = true;
+    el.classList.remove('lift');
+    el.style.transition = 'left ' + FLY_BACK_MS + 'ms ease-out, top ' + FLY_BACK_MS + 'ms ease-out, ' +
+                          'transform .15s ease-out, opacity .4s ease-out';
+    el.style.left = m.trayX + 'px';
+    el.style.top  = m.trayY + 'px';
+    pieceLayer.appendChild(el);
+    playSound();
+    setTimeout(function () {
+      el.style.transition = '';
+      animLock = false;
+    }, FLY_BACK_MS);
+  }
+
+  /* 重来（btn-again）：Q45 = **重置本幕** —— 清空落位碎片、回到第 1 波。
+     ⚠️ 背景 / 右侧底板 / 两个圆钮 / 参考缩略图**都不重播**（C1 / C2 不重跑）——
+        这正是「重置本幕」与「整局重开」的分界。 */
+  function resetPuzzle() {
+    if (busy || animLock || dragging) return;
+    playSound();
+    puzzleGen++;                             // 作废在途的「下一波」延迟
+    for (var id in puzzleEls) {
+      if (Object.prototype.hasOwnProperty.call(puzzleEls, id)) puzzleEls[id].remove();
+    }
+    puzzleEls = {};
+    lockedIds = {};
+    puzzleCount = 0;
+    puzzleWave = 0;
+    dropWave(0);                             // 重新投第 1 波
+  }
+
+  /* 看参考图（btn-picture）：Q51 = 手动那次 **3s**；重复点击**重置**计时（不是叠加）。
+     ⚠️ 这一步**不能用 anim()** —— 那会让 busy 在这 3s 内为 true，
+        碎片将拖不动、两个圆钮也点不动；而需求明确「期间不打断拼图」。
+        所以只做 classList 切换 + setTimeout，完全不碰 busy。 */
+  function showHint(ms) {
+    smallPicture.classList.add('in');        // 淡入 300ms（CSS 过渡）
+    if (hintTimer) clearTimeout(hintTimer);
+    hintTimer = setTimeout(function () {
+      smallPicture.classList.remove('in');   // 淡出 300ms
+      hintTimer = null;
+    }, ms);
+  }
+
+  function bindPuzzlePlay() {
+    // 跟随光标：只记录坐标，改样式交给 rAF 节流
+    stage.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      var p = toStage(e);
+      dragging.x = p.x;
+      dragging.y = p.y;
+      if (dragPending) return;
+      dragPending = true;
+      requestAnimationFrame(flushDrag);
+    });
+    // 松开 / 取消：绑在 #stage（不绑 document，避免拖出窗口后仍跟随），只在 dragging 非空时生效
+    stage.addEventListener('pointerup', onStagePointerUp);
+    stage.addEventListener('pointercancel', onStagePointerUp);
+
+    btnAgain.addEventListener('click', function () {
+      if (busy || animLock || dragging || act6Done) return;
+      resetPuzzle();
+    });
+    btnPicture.addEventListener('click', function () {
+      if (busy || animLock || dragging || act6Done) return;
+      playSound();
+      showHint(MANUAL_HINT_MS);
+    });
+  }
+
+  // C1 入场：黑幕停留 500ms → .active → 黑幕淡出 400ms → 画框底罩 / 静态底同帧淡入 300ms
+  function runAct6Intro() {
+    return sleep(500)                        // 与全片所有转场一致；素材已在 runAct5 的 B8 起预加载
+      .then(function () {
+        // 激活瞬间画面仍全黑，可瞬时切换（同第三 / 四 / 五幕）
+        return anim(0, function () { act6.classList.add('active'); });
+      })
+      .then(function () {
+        // 幕间转场黑幕淡出 400ms —— runAct5 的 B8 刚把 .fast 摘掉（那里要 700ms 渐入），这里补回
+        blackout.classList.add('fast');
+        return anim(400, function () { blackout.classList.remove('in'); });
+      })
+      .then(function () {
+        // 画框底罩(3) 与 静态底(4) **同一帧**交叉淡入。
+        // ⚠️ bg-picture 不需要 .in —— 它是本幕「一开始就在」的常驻底（z 1），
+        //    「露出木桌」完全由上面黑幕淡出完成；照抄第五幕的 bg-inside 会变成
+        //    「黑幕淡完画面还是空的、再等 300ms 才出木桌」。
+        return anim(300, function () {
+          pictureLine.classList.add('in');
+          pieceMany.classList.add('in');
+        });
+      });
+  }
+
+  // C2 右侧 UI：底板自右向左滑入 → 两钮自左向右滑入（错峰 100ms）→ 自动参考图 2s
+  function runAct6Ui() {
+    return anim(600, function () { framePicture.classList.add('in'); })
+      .then(function () { return anim(500, function () { btnAgain.classList.add('in'); }); })
+      .then(function () { btnAgain.classList.add('settled'); return sleep(100); })
+      .then(function () { return anim(500, function () { btnPicture.classList.add('in'); }); })
+      .then(function () { btnPicture.classList.add('settled'); return sleep(100); })
+      .then(function () { return anim(300, function () { smallPicture.classList.add('in'); }); })
+      .then(function () { return sleep(AUTO_HINT_MS); })               // 自动那次 = 2s（Q50）
+      .then(function () { return anim(300, function () { smallPicture.classList.remove('in'); }); });
+  }
+
+  /* C3 拼图玩法：事件驱动，Promise 在 **9/9 落位**时 resolve。
+     ⚠️ 进玩法循环前必须把 busy 置回 false —— waitClick / 各点击监听里的 busy 判定
+        会把点击全吞掉，而本幕的拖拽靠 pointerdown（第三幕踩过同一个坑）。 */
+  function runPuzzlePlay() {
+    busy = false;
+    puzzleLive = true;
+    return new Promise(function (resolve) {
+      puzzleResolve = resolve;               // 交给 advanceAfterLock() 在 9/9 时调用
+      dropWave(0);
+    });
+  }
+
+  /* C4 完成态 + C5 收尾：四拍与时长**逐项沿用第四幕**（runAct4() 末段）。
+     终点 = 点击 Continue → 黑幕渐入 → 全黑滞留（Q53）。 */
+  function runAct6Finish() {
+    return anim(350, function () {})        // 第 9 张落位后停顿（需求 §9.6 的 300–400，取中值）
+      .then(function () { return anim(400, function () { allPicture.classList.add('in'); }); })
+      // Q49 / Q54：发光**常驻不熄灭** —— 挂上就不再摘，进入 C5 也保持，
+      // 只是随后被 #shadow6（70% 蒙黑）整体压暗
+      .then(function () { return anim(0, function () { allPicture.classList.add('glow'); }); })
+      .then(function () { return sleep(2000); })                       // Q54：「2s」＝进 C5 的等待
+
+      // C5 第 1 拍：蒙黑 600ms —— **同一帧**（取淡入首帧）关掉两钮点击（Q56）。
+      // ⚠️ 不等到 600ms 淡完再关：否则那个窗口里点 btn-again 会把正在收尾的幕重置，
+      //    留下「蒙黑已出、拼图却被清空」的错乱态。
+      .then(function () {
+        // Q55：幕内一切保留、不做淡出。参考缩略图若恰在显示也让它留着（不摘 .in），
+        // 因此在这里停掉它的计时器，避免它自己在收尾途中淡出。
+        if (hintTimer) { clearTimeout(hintTimer); hintTimer = null; }
+        return anim(600, function () {
+          shadow6.classList.add('in');
+          btnAgain.classList.add('dead');
+          btnPicture.classList.add('dead');
+        });
+      })
+      // 第 2 拍：第二张 Goal 卡落下 380ms
+      .then(function () { return anim(380, function () { goal02.classList.add('in'); }); })
+      // 第 3 拍：Continue 滑入 500ms → **滑完**才可点
+      .then(function () {
+        return anim(500, function () { btnContinue6.classList.add('in'); }).then(function () {
+          btnContinue6.classList.add('ready');
+          setTimeout(function () { btnContinue6.classList.add('settled'); }, 520);
+        });
+      })
+      .then(function () { return waitClick(btnContinue6); })
+
+      /* 第 4 拍：点击的**同一帧**整组撤场 + 黑幕渐入（D8 第三次实例）。
+         ⚠️ 只撤这三件 —— 已落位碎片 / all-picture（含光晕）/ 右侧底板 / 两个圆钮
+            按 Q55 明确「保留」，不得在这里给它们加 .out 或淡出。
+         三撤场 120 / 400 / 150ms **全部短于**黑幕 400ms → 黑幕到顶时幕内已无残留。 */
+      .then(function () {
+        return anim(400, function () {
+          goal02.classList.remove('in');          // 回 CSS 初态，opacity 120ms 归零
+          shadow6.classList.remove('in');
+          shadow6.classList.add('out');           // 退场压至 400ms
+          btnContinue6.classList.remove('in');
+          btnContinue6.classList.add('out');      // 退场压至 150ms
+          blackout.classList.add('in');           // 400ms 渐入
+        });
+      })
+      // 全黑滞留 = 全片终点（Q53）：不重播、不显示额外文字 / 按钮、不回到第一幕
+      .then(function () { return sleep(400); })
+      .then(function () { act6Done = true; });
+  }
+
+  // 第六幕总控：串起 C1 → C5（分幕结构与第三幕同构，只是多一步）
+  function runAct6() {
+    act6Started = true;
+    return Promise.resolve()
+      .then(runAct6Intro)
+      .then(runAct6Ui)
+      .then(runPuzzlePlay)
+      .then(runAct6Finish);
   }
 
   /* ================= 主流程 ================= */
@@ -1601,6 +2307,11 @@
       // 21. 第五幕：视频 → 户外两句 → 进室内 → 室内两句 → 引导手 → 点纸片 → 黑幕转场
       .then(runAct5)
 
+      // 22. 第六幕：拼碎纸 / 修复古画 → C1 入场 → C2 右侧 UI → C3 拼图（9/9）
+      //     → C4 发光 → C5 蒙黑 + Goal 2 + Continue → 全黑滞留（**全片终**）
+      .then(bindPuzzlePlay)
+      .then(runAct6)
+
       .catch(function (err) {
         reportFailure('运行出错', (err && (err.stack || err.message)) || String(err));
       });
@@ -1613,6 +2324,30 @@
     dropBox: function () { return DROP_BOX; },      // 「可显示范围」红框（画布坐标）
     dropCenter: function () { return DROP; },       // 由红框内缩得到的贴纸中心可落点区间
     body: function () { return DROP_BOX; },         // 旧名，语义等同 dropBox
+    // 第六幕拼图几何的唯一来源（与 index.html 内的 PUZZLE_* 同源，不在测试里重抄一遍）
+    puzzle: function () {
+      var center = {};
+      for (var id in PUZZLE_PIECES) {
+        if (Object.prototype.hasOwnProperty.call(PUZZLE_PIECES, id)) {
+          var m = PUZZLE_PIECES[id];
+          center[id] = { x: m.goalX + m.w / 2, y: m.goalY + m.h / 2 };
+        }
+      }
+      return {
+        dir: PUZZLE_DIR,
+        waves: PUZZLE_WAVES,
+        pieces: PUZZLE_PIECES,
+        goalCenter: center,
+        tolerance: HIT_TOLERANCE,
+        snapMs: SNAP_MS,
+        flyBackMs: FLY_BACK_MS,
+        autoHintMs: AUTO_HINT_MS,
+        manualHintMs: MANUAL_HINT_MS,
+        resetScope: RESET_SCOPE
+      };
+    },
+    // 纯判定：喂「碎片中心」坐标 → 是否命中（不碰画面，供 a6b 的判定矩阵单测）
+    judgeAt: function (id, cx, cy) { return hitTest(id, cx, cy); },
     state: function () {
       return {
         count: stickerCount, okReady: okReady, placing: !!placing, act3Done: act3Done,
@@ -1631,6 +2366,34 @@
           papersClickable: btnPapers.classList.contains('clickable'),
           hand5In: hand5.classList.contains('in'),
           bgInsideIn: bgInside.classList.contains('in')
+        },
+        // 第六幕状态（需求 §9）—— 供测试断言，只读
+        act6: {
+          started: act6Started,
+          active: act6.classList.contains('active'),
+          count: puzzleCount,                    // 已落位碎片数 0 → 9
+          wave: puzzleWave,                      // 当前波次
+          dragging: !!dragging,                  // 是否正在拖拽
+          locked: (function () { var n = 0, k; for (k in lockedIds) { if (Object.prototype.hasOwnProperty.call(lockedIds, k)) n++; } return n; })(),
+          puzzleLive: puzzleLive,
+          bgPictureSrc: bgPicture.getAttribute('src'),
+          pictureLineIn: pictureLine.classList.contains('in'),
+          pieceManyIn: pieceMany.classList.contains('in'),
+          framePictureIn: framePicture.classList.contains('in'),
+          btnAgainIn: btnAgain.classList.contains('in'),
+          btnAgainDead: btnAgain.classList.contains('dead'),
+          btnPictureIn: btnPicture.classList.contains('in'),
+          btnPictureDead: btnPicture.classList.contains('dead'),
+          smallPictureIn: smallPicture.classList.contains('in'),
+          allPictureIn: allPicture.classList.contains('in'),
+          allPictureGlow: allPicture.classList.contains('glow'),   // Q54：应为「挂上后不摘除」
+          shadow6In: shadow6.classList.contains('in'),
+          shadow6Out: shadow6.classList.contains('out'),
+          goal02In: goal02.classList.contains('in'),
+          continue6In: btnContinue6.classList.contains('in'),
+          continue6Ready: btnContinue6.classList.contains('ready'),
+          uiOut: act6.classList.contains('ui-out'),               // Q55：本幕**必须**恒为 false
+          done: act6Done
         },
         // BGM 状态（需求 §3.5 / Q27–Q30）—— 供测试断言，只读
         bgm: {

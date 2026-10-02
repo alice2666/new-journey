@@ -13,6 +13,13 @@
  *   node .workbuddy/tools/test.js bgm      背景音乐：点击 START 起播 -> 跨幕连续 -> 点击 Continue 停止
  *   node .workbuddy/tools/test.js bgm2     BGM 缺失时不得阻塞开场（屏蔽音乐资源后重跑）
  *   node .workbuddy/tools/test.js full2    第一 ~ 第四幕全流程（真实播放视频）
+ *   node .workbuddy/tools/test.js a5       第五幕：户外定格图 -> 户外对话 -> 切室内 -> 纸片
+ *   node .workbuddy/tools/test.js a5b      第五幕：室内对话 -> 引导手 -> 点纸片 -> 黑幕
+ *   node .workbuddy/tools/test.js full3    第一 ~ 第五幕全流程
+ *   node .workbuddy/tools/test.js a6       第六幕：C1 入场 / C2 右侧 UI 的结构与几何
+ *   node .workbuddy/tools/test.js a6b      第六幕：C3 拼图玩法（判定矩阵 + 拖拽 + 缩放补偿）
+ *   node .workbuddy/tools/test.js a6c      第六幕：C4 发光 / C5 蒙黑 + Goal 2 + Continue（终点）
+ *   node .workbuddy/tools/test.js full4    第一 ~ 第六幕全流程（全片终）
  *
  * 退出码：0 = 全部通过，1 = 存在失败
  * 截图输出：.workbuddy/tools/shots/（已 gitignore，仅供人工目检）
@@ -150,7 +157,7 @@ const INK_TOP_FN = `(() => {
 /* ================= 主流程 ================= */
 (async () => {
   const which = process.argv.slice(2).filter((a) => !a.startsWith('-'));
-  const cases = which.length ? which : ['gate', 'p1', 'p2', 'flow', 'a3', 'a3b', 'a3c', 'a4', 'a5', 'a5b', 'bgm', 'bgm2', 'full2', 'full3'];
+  const cases = which.length ? which : ['gate', 'p1', 'p2', 'flow', 'a3', 'a3b', 'a3c', 'a4', 'a5', 'a5b', 'a6', 'a6b', 'a6c', 'bgm', 'bgm2', 'full2', 'full3', 'full4'];
 
   const child = spawn(EDGE, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -284,12 +291,20 @@ const INK_TOP_FN = `(() => {
   async function caseGate() {
     const SCENE_SNAP = `(() => {
       const eff = (el) => { let o = 1, n = el; while (n && n !== document.documentElement) { o *= parseFloat(getComputedStyle(n).opacity); n = n.parentElement; } return +o.toFixed(3); };
-      const ids = ['act1', 'act2', 'act3', 'act4', 'act5', 'act6', 'bg-room-suitcase', 'bg-inside', 'shadow'];
+      const ids = ['act1', 'act2', 'act3', 'act4', 'act5', 'act6', 'bg-room-suitcase', 'bg-inside', 'shadow', 'bg-picture', 'frame-picture', 'shadow6', 'goal02', 'continue6'];
       const out = {};
       ids.forEach((id) => { const el = document.getElementById(id); if (el) out[id] = eff(el); });
       return JSON.stringify(out);
     })()`;
     const snap = async () => JSON.parse(await evaluate(SCENE_SNAP));
+    // 幕内常驻/半透明层的**自身** opacity（幕级门控兜不住它们，必须各自门控 —— R25）
+    const OWN_OPACITY = `(() => {
+      const ids = ['shadow6', 'goal02', 'continue6'];
+      const out = {};
+      ids.forEach((id) => { const el = document.getElementById(id); out[id] = el ? +(+getComputedStyle(el).opacity).toFixed(3) : null; });
+      return JSON.stringify(out);
+    })()`;
+    const own = async () => JSON.parse(await evaluate(OWN_OPACITY));
 
     // ① 载入后一次都没点击：只允许第一幕可见
     const s1 = await snap();
@@ -298,12 +313,19 @@ const INK_TOP_FN = `(() => {
     assertEq('gate 载入时第三幕整幕不可见（漏门控就会盖住第一幕）', s1.act3, 0, 0.01);
     assertEq('gate 载入时第四幕整幕不可见', s1.act4, 0, 0.01);
     assertEq('gate 载入时第五幕整幕不可见（z=5 最高，漏门控必盖住第一幕 —— R19）', s1.act5, 0, 0.01);
-    assertEq('gate 载入时第六幕整幕不可见', s1.act6, 0, 0.01);
+    assertEq('gate 载入时第六幕整幕不可见（z=6 最高，漏门控必盖住全部前五幕 —— R24）', s1.act6, 0, 0.01);
     assertEq('gate 载入时第三幕定格图不可见（它是常驻可见元素，最易漏）', s1['bg-room-suitcase'], 0, 0.01);
     assertEq('gate 载入时第五幕室内背景不可见（同为全屏常驻图，R19）', s1['bg-inside'], 0, 0.01);
+    assertEq('gate 载入时第六幕木桌不可见（1200x896 常驻图，R24）', s1['bg-picture'], 0, 0.01);
+    assertEq('gate 载入时第六幕右侧底板不可见（356x896、主体不透明，R24）', s1['frame-picture'], 0, 0.01);
+    assertEq('gate 载入时第六幕蒙黑层不可见（全屏 70% 蒙黑图）', s1['shadow6'], 0, 0.01);
+    const o1 = await own();
+    assertEq('gate 载入时 #shadow6 自带 opacity:0（幕级门控兜不住它 —— R25）', o1.shadow6, 0, 0.01);
+    assertEq('gate 载入时 #goal02 自带 opacity:0', o1.goal02, 0, 0.01);
+    assertEq('gate 载入时 #continue6 自带 opacity:0', o1.continue6, 0, 0.01);
     await shot('gate-1-act1-start');
 
-    // ② 第二幕进行中：第一幕退场、第三幕仍不可见
+    // ② 第二幕进行中：第一幕退场、第三 ~ 六幕仍不可见
     await toAct2SecondLine();
     const s2 = await snap();
     assertEq('gate 第二幕时第一幕已退场', s2.act1, 0, 0.01);
@@ -312,6 +334,9 @@ const INK_TOP_FN = `(() => {
     assertEq('gate 第二幕时第四幕仍不可见', s2.act4, 0, 0.01);
     assertEq('gate 第二幕时第五幕仍不可见', s2.act5, 0, 0.01);
     assertEq('gate 第二幕时第五幕室内背景仍不可见', s2['bg-inside'], 0, 0.01);
+    assertEq('gate 第二幕时第六幕仍不可见', s2.act6, 0, 0.01);
+    assertEq('gate 第二幕时第六幕木桌仍不可见', s2['bg-picture'], 0, 0.01);
+    assertEq('gate 第二幕时第六幕底板仍不可见', s2['frame-picture'], 0, 0.01);
     await shot('gate-2-act2-room');
 
     // ③ 接着第二幕继续推进到第三幕激活：整幕转为可见（防止「修反了」变成永远不显示）
@@ -328,6 +353,9 @@ const INK_TOP_FN = `(() => {
     assertEq('gate 第三幕时定格图可见', s3['bg-room-suitcase'], 1, 0.01);
     assertEq('gate 第三幕时第五幕仍不可见', s3.act5, 0, 0.01);
     assertEq('gate 第三幕时第五幕室内背景仍不可见', s3['bg-inside'], 0, 0.01);
+    assertEq('gate 第三幕时第六幕仍不可见', s3.act6, 0, 0.01);
+    assertEq('gate 第三幕时第六幕木桌仍不可见', s3['bg-picture'], 0, 0.01);
+    assertEq('gate 第三幕时第六幕底板仍不可见', s3['frame-picture'], 0, 0.01);
 
     // ④ 各幕必须是「自包含的堆叠上下文」：否则幕内高 z-index 元素会跑到 #stage 层，
     //    盖住层级更高但幕内元素 z-index 更低的后续幕。
@@ -346,6 +374,84 @@ const INK_TOP_FN = `(() => {
       assertTrue(`gate #${id} 建立自包含堆叠上下文（isolation:isolate）`,
         gc[id] === 'isolate', '实测 isolation = ' + gc[id]);
     }
+
+    /* ⑤ 一路推到第六幕激活：此刻 #act6 转为可见，而 #act5 必须已退场，
+          且幕内常驻图层（木桌 / 底板）随之可见 —— 这一段守的正是 R24：
+          「幕级门控漏写」与「幕级门控写反」两种错法都会在这里现形。 */
+    await waitFor(`!document.getElementById('blackout').classList.contains('in')`, 20000, '第三幕黑幕淡出');
+    await evaluate(`(() => {
+      const e = document.getElementById('act3-video');
+      if (e.readyState >= 1 && e.duration > 0) e.currentTime = Math.max(0, e.duration - 0.4);
+    })()`);
+    await waitFor(`document.getElementById('chat3').classList.contains('in')`, 20000, 'chat3 滑入');
+    await waitFor(`document.getElementById('btn-go3').classList.contains('in')`, 25000, '第三句打完');
+    await sleep(300);
+    await click('#btn-go3');
+    await waitFor(`document.getElementById('btn-ok').classList.contains('in')`, 12000, '面板按钮滑入');
+    await waitFor(`window.__nj.state().busy === false`, 8000, '面板入场锁释放');
+    await evaluate(`window.__nj.setRotation(0)`);
+    await place('bag', 250, 400);
+    await place('camera', 400, 550);
+    await place('drink', 300, 680);
+    await waitFor(`window.__nj.state().okReady === true`, 5000, 'OK 可用');
+    await sleep(150);
+    await click('#btn-ok');
+    await waitFor(`document.getElementById('continue').classList.contains('in')`, 12000, 'Continue 滑入');
+    await sleep(600);
+    await click('#continue');
+    /* ⚠️ 这里必须**接着往下推**，不能调 toAct5Hand() —— 那会从第一幕重跑整条链路，
+       而第二幕的 GO / 行李箱早已点过，会永远等不到第二次（实测就是这样超时的）。 */
+    await waitFor(`window.__nj.state().act5.outdoorIn === true`, 20000, '户外定格图淡入');
+    await waitFor(`document.getElementById('btn-go5a').classList.contains('in')`, 25000, '第 ④ 句打完');
+    await sleep(350); await click('#btn-go5a');
+    await waitFor(`document.getElementById('btn-go5a').classList.contains('in')`, 25000, '第 ⑤ 句打完');
+    await sleep(350); await click('#btn-go5a');
+    await waitFor(`document.getElementById('chat5b').classList.contains('in')`, 10000, 'chat5b 滑入');
+    await waitFor(`document.getElementById('btn-go5b').classList.contains('in')`, 25000, '第 ⑥ 句打完');
+    await sleep(350); await click('#btn-go5b');
+    await waitFor(`document.getElementById('btn-go5b').classList.contains('in')`, 25000, '第 ⑦ 句打完');
+    await sleep(350); await click('#btn-go5b');
+    await waitFor(`window.__nj.state().act5.papersClickable === true`, 10000, '纸片可点');
+    await sleep(400);
+    await click('#btn-papers');
+    await waitFor(`document.getElementById('act6').classList.contains('active')`, 20000, '第六幕激活');
+    await waitFor(`window.__nj.state().act6.framePictureIn === true`, 15000, 'C2 底板滑入');
+    await sleep(400);
+
+    const s6 = await snap();
+    assertEq('gate 第六幕激活后整幕可见', s6.act6, 1, 0.01);
+    assertEq('gate 第六幕时木桌可见（1200x896 常驻图，必须靠幕级门控藏住）', s6['bg-picture'], 1, 0.01);
+    assertEq('gate 第六幕时右侧底板可见', s6['frame-picture'], 1, 0.01);
+    /* ⚠️ 全片的设计是「幕一旦进入就**不再摘 .active**」（#act4 / #act5 此时仍 op=1），
+       所以「上一幕退场」不是靠容器 opacity，而是靠 ① 更高的 z-index ② 本幕那张
+       **不透明**的全屏木桌把它盖住。这里断言的就是这两条真实机制，
+       而不是想当然的「上一幕 opacity 应该变 0」。 */
+    assertTrue('gate 第六幕木桌是不透明全屏图（α=255，足以彻底盖住仍为 .active 的第四 / 五幕）',
+      await evaluate(`(() => new Promise((resolve) => {
+        const im = new Image();
+        im.onload = () => {
+          const c = document.createElement('canvas');
+          c.width = im.naturalWidth; c.height = im.naturalHeight;
+          const x = c.getContext('2d');
+          x.drawImage(im, 0, 0);
+          const pts = [[8, 8], [600, 400], [1190, 880]];
+          resolve(pts.every((p) => x.getImageData(p[0], p[1], 1, 1).data[3] === 255));
+        };
+        im.src = 'assets/screen6/bg-picture.png';
+      }))()`));
+    const zA6 = await evaluate(`parseInt(getComputedStyle(document.getElementById('act6')).zIndex, 10)`);
+    const zA5 = await evaluate(`parseInt(getComputedStyle(document.getElementById('act5')).zIndex, 10)`);
+    const zA4 = await evaluate(`parseInt(getComputedStyle(document.getElementById('act4')).zIndex, 10)`);
+    assertTrue('gate 第六幕 z(' + zA6 + ') > 第五幕 z(' + zA5 + ') 且 > 第四幕 z(' + zA4 + ')（层级压住）',
+      zA6 > zA5 && zA6 > zA4);
+    assertEq('gate 第六幕时第四幕三个可见元素均已归零（.active 还留着，内容不残留）',
+      Math.max(await effOpacity('#goal01'), await effOpacity('#shadow'), await effOpacity('#continue')), 0, 0.01);
+    const o6 = await own();
+    assertEq('gate 第六幕 C1/C2 期间 #shadow6 自身 opacity 仍为 0（守 R25）', o6.shadow6, 0, 0.01);
+    assertEq('gate 第六幕 C1/C2 期间 #goal02 自身 opacity 仍为 0', o6.goal02, 0, 0.01);
+    assertEq('gate 第六幕 C1/C2 期间 #continue6 自身 opacity 仍为 0', o6.continue6, 0, 0.01);
+    assertEq('gate 第六幕 C1/C2 期间 #shadow6 的有效可见度也为 0', s6['shadow6'], 0, 0.01);
+    await shot('gate-3-act6');
   }
 
   /* ================= 用例 p1：台词文本位置 =================
@@ -1366,17 +1472,28 @@ const INK_TOP_FN = `(() => {
     // 纯黑帧里不能再有任何卡片墨迹（黑幕不透明，理应彻底遮住）
     assertEq('a4 全黑帧中 Goal 卡片不可见（整幕 op 已归零）', await effOpacity('#goal01'), 0, 0.01);
     assertEq('a4 全黑帧中 Continue 按钮不可见（v2.15）', await effOpacity('#continue'), 0, 0.01);
-    assertTrue('a4 #act6 / #act6-slot / #act7-slot 预留容器存在（第五幕已升为实际容器 #act5）',
+    assertTrue('a4 第六幕容器已填入完整 DOM（v2.14 起不再是空容器）',
       await evaluate(`(() => {
         const a6 = document.getElementById('act6');
-        const s6 = document.getElementById('act6-slot');
+        const need = ['bg-picture','frame-picture','picture-line','piece-many','piece-layer',
+                      'all-picture','btn-again','btn-picture','small-picture','piece-drag',
+                      'shadow6','goal02','continue6'];
+        return !!a6 && need.every((id) => {
+          const el = document.getElementById(id);
+          return !!el && el.parentElement && el.parentElement.id === 'act6';
+        });
+      })()`));
+    assertTrue('a4 到达第四幕末时第六幕仍未激活（幕级门控）',
+      !(await hasClass('#act6', 'active')) && (await effOpacity('#act6')) === 0);
+    assertTrue('a4 #act7-slot 预留容器仍为空',
+      await evaluate(`(() => {
         const s7 = document.getElementById('act7-slot');
-        return !!a6 && a6.children.length === 0
-          && !!s6 && s6.children.length === 0 && s6.textContent.trim() === ''
-          && !!s7 && s7.children.length === 0 && s7.textContent.trim() === '';
+        return !!s7 && s7.children.length === 0 && s7.textContent.trim() === '';
       })()`));
     assertTrue('a4 旧 #act5-slot 已退役（第五幕升为 #act5 实际容器）',
       await evaluate(`document.getElementById('act5-slot') === null`));
+    assertTrue('a4 旧 #act6-slot 已退役（第六幕升为 #act6 实际容器）',
+      await evaluate(`document.getElementById('act6-slot') === null`));
   }
 
   /* ================= 用例 full2：第一 ~ 第四幕全流程（真实播放视频） ================= */
@@ -1677,6 +1794,830 @@ const INK_TOP_FN = `(() => {
     assertTrue('full3 全流程无控制台报错', errors.length === 0, errors.join(' | '));
   }
 
+  /* ==================================================================
+     第六幕公共前置与工具（需求 §9 / 开发计划 §6.20–§6.26）
+     ================================================================== */
+
+  // 第五幕一路推到「引导手出现、纸片可点」为止
+  const toAct5Hand = async () => {
+    await toAct5();
+    await waitFor(`!document.getElementById('blackout').classList.contains('in')`, 20000, '第五幕黑幕淡出');
+    await waitFor(`window.__nj.state().act5.outdoorIn === true`, 8000, '户外定格图淡入');
+    await waitFor(`document.getElementById('btn-go5a').classList.contains('in')`, 25000, '第 ④ 句打完');
+    await sleep(350); await click('#btn-go5a');
+    await waitFor(`document.getElementById('btn-go5a').classList.contains('in')`, 25000, '第 ⑤ 句打完');
+    await sleep(350); await click('#btn-go5a');
+    await waitFor(`document.getElementById('chat5b').classList.contains('in')`, 10000, 'chat5b 滑入');
+    await waitFor(`document.getElementById('btn-go5b').classList.contains('in')`, 25000, '第 ⑥ 句打完');
+    await sleep(350); await click('#btn-go5b');
+    await waitFor(`document.getElementById('btn-go5b').classList.contains('in')`, 25000, '第 ⑦ 句打完');
+    await sleep(350); await click('#btn-go5b');
+    await waitFor(`window.__nj.state().act5.papersClickable === true`, 10000, '纸片可点');
+    await sleep(400);
+  };
+
+  // 点纸片 → 第六幕激活（此刻 C1 刚开始：黑幕停留 500ms）
+  const toAct6 = async () => {
+    await toAct5Hand();
+    await click('#btn-papers');
+    await waitFor(`document.getElementById('act6').classList.contains('active')`, 20000, '第六幕激活');
+  };
+
+  // C1 + C2 全部走完（自动参考图 2s 已淡出）、第 1 波 3 张已在底板
+  const toAct6Play = async () => {
+    await toAct6();
+    await waitFor(`window.__nj.state().act6.pieceManyIn === true`, 10000, '静态底淡入完成');
+    await waitFor(`window.__nj.state().act6.framePictureIn === true`, 10000, '右侧底板滑入');
+    await waitFor(`window.__nj.state().act6.btnPictureIn === true`, 15000, 'btn-picture 滑入');
+    // ⚠️ C2 末尾还有「自动参考图 2s → 淡出」，之后 runPuzzlePlay 才投第 1 波（Q50：先后出现）。
+    //    不能只等 busy === false —— 那会落在「两钮滑入完成、缩略图还没出」的空窗里。
+    await waitFor(`document.querySelectorAll('#piece-layer .piece').length === 3`, 25000, '第 1 波投放');
+    await waitFor(`window.__nj.state().busy === false && window.__nj.state().animLock === false`, 10000, 'C3 开始');
+    await sleep(250);
+  };
+
+  /* ---- 画布坐标 → 视口坐标（#stage 带 scale，测试端也必须换算） ---- */
+  const canvasToViewport = (cx, cy) => evaluate(`(() => {
+    const r = document.getElementById('stage').getBoundingClientRect();
+    const s = r.width / ${STAGE_W};
+    return { x: r.left + (${cx}) * s, y: r.top + (${cy}) * s };
+  })()`);
+
+  /* ---- 拖拽三段式：按下 → 多次移动 → 松开 ----
+     ⚠️ 第六幕走的是 pointerdown / pointermove / pointerup 链路，
+        只派发一次 click 是拿不起碎片的（与第三幕贴纸的点击流完全不同）。 */
+  const mouseDownAt = async (cx, cy) => {
+    const p = await canvasToViewport(cx, cy);
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y, button: 'none', buttons: 0 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: p.x, y: p.y, button: 'left', buttons: 1, clickCount: 1 });
+    return p;
+  };
+  const mouseMoveAt = async (cx, cy) => {
+    const p = await canvasToViewport(cx, cy);
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y, button: 'left', buttons: 1 });
+    return p;
+  };
+  const mouseUpAt = async (cx, cy) => {
+    const p = await canvasToViewport(cx, cy);
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: p.x, y: p.y, button: 'left', buttons: 0, clickCount: 1 });
+    return p;
+  };
+  // 完整的拖拽（中间给 4 个采样点，同时覆盖 rAF 节流与「中心跟随」）
+  const dragCanvas = async (fromX, fromY, toX, toY) => {
+    await mouseDownAt(fromX, fromY);
+    const N = 4;
+    for (let i = 1; i <= N; i++) {
+      const t = i / N;
+      await mouseMoveAt(fromX + (toX - fromX) * t, fromY + (toY - fromY) * t);
+      await sleep(25);
+    }
+    await mouseUpAt(toX, toY);
+  };
+
+  // 某张碎片的布局几何（两张父层都查：拖拽中它在 #piece-drag 里）
+  const pieceBox = (id) => evaluate(`(() => {
+    const sel = '.piece[data-piece=' + JSON.stringify(${JSON.stringify(id)}) + ']';
+    const el = document.querySelector('#piece-layer ' + sel) || document.querySelector('#piece-drag ' + sel);
+    if (!el) return null;
+    const stage = document.getElementById('stage');
+    let x = 0, y = 0, n = el;
+    while (n && n !== stage) { x += n.offsetLeft; y += n.offsetTop; n = n.offsetParent; }
+    return {
+      left: x, top: y, width: el.offsetWidth, height: el.offsetHeight,
+      cx: +(x + el.offsetWidth / 2).toFixed(2), cy: +(y + el.offsetHeight / 2).toFixed(2),
+      parent: el.parentElement.id, locked: el.classList.contains('lift')
+    };
+  })()`);
+
+  const pieceCount = (layer) =>
+    evaluate(`document.querySelectorAll('#${layer} .piece').length`);
+
+  // 等某张碎片在底板淡入、且演出锁已释放（波次间隔期 busy 会短暂为 true）
+  const waitPieceReady = async (id) => {
+    await waitFor(`(() => {
+      const list = document.querySelectorAll('#piece-layer .piece');
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].getAttribute('data-piece') === ${JSON.stringify(id)} && list[i].classList.contains('in')) return true;
+      }
+      return false;
+    })()`, 12000, id + ' 在底板淡入');
+    await waitFor(`window.__nj.state().busy === false && window.__nj.state().animLock === false`, 8000, '解锁');
+    await sleep(80);
+  };
+
+  // 把 9 张碎片全部拖到目标位；返回完成次数（应等于 9）
+  const solveAllPieces = async () => {
+    const pz = await evaluate('window.__nj.puzzle()');
+    let n = 0;
+    for (const wave of pz.waves) {
+      for (const id of wave) {
+        await waitPieceReady(id);
+        const b = await pieceBox(id);
+        if (!b) throw new Error('找不到碎片 ' + id);
+        const g = pz.goalCenter[id];
+        await dragCanvas(b.cx, b.cy, g.x, g.y);
+        n++;
+        await waitFor(`window.__nj.state().act6.count === ${n}`, 8000, id + ' 落位（count=' + n + '）');
+        await sleep(150);
+      }
+    }
+    return n;
+  };
+
+  /* ---- 动作采样探针：量「某个元素怎么动的」必须读动画期的 computed transform ---- */
+  const startDropProbe = (id, durMs) => evaluate(`(() => {
+    window.__drop = [];
+    const el = document.getElementById(${JSON.stringify(id)});
+    const t0 = performance.now();
+    const read = () => {
+      const cs = getComputedStyle(el);
+      const m = cs.transform;
+      let tx = 0, ty = 0;
+      if (m && m.indexOf('matrix') === 0) {
+        const n = m.slice(m.indexOf('(') + 1, m.lastIndexOf(')')).split(',').map(Number);
+        if (n.length === 6) { tx = n[4]; ty = n[5]; } else { tx = n[12]; ty = n[13]; }
+      }
+      window.__drop.push({
+        t: Math.round(performance.now() - t0),
+        tx: +tx.toFixed(2), ty: +ty.toFixed(2),
+        op: +(+cs.opacity).toFixed(3),
+        in: el.classList.contains('in')
+      });
+    };
+    window.__dropTimer = setInterval(() => {
+      read();
+      if (performance.now() - t0 > ${durMs || 8000}) clearInterval(window.__dropTimer);
+    }, 10);
+    read();
+    return true;
+  })()`);
+
+  const readDropProbe = () => evaluate(`(() => {
+    clearInterval(window.__dropTimer);
+    const all = window.__drop.slice();
+    const after = all.filter((r) => r.in);
+    const first = after[0] || null;
+    const last = all[all.length - 1] || null;
+    let landAt = null;
+    for (let i = 0; i < after.length; i++) { if (after[i].ty >= -0.5) { landAt = after[i].t; break; } }
+    const mid = after.filter((r) => r.ty > -699 && r.ty < -5);
+    let mono = true;
+    for (let i = 1; i < after.length; i++) { if (after[i].ty < after[i - 1].ty - 0.6) mono = false; }
+    let txMax = 0, opMin = 2;
+    all.forEach((r) => { txMax = Math.max(txMax, Math.abs(r.tx)); });
+    mid.forEach((r) => { opMin = Math.min(opMin, r.op); });
+    return {
+      afterN: after.length,
+      startTy: first ? first.ty : null,
+      endTy: last ? last.ty : null,
+      landAt: landAt,
+      firstInT: first ? first.t : null,
+      midCount: mid.length,
+      midOpMin: mid.length ? opMin : null,
+      mono: mono,
+      txMax: +txMax.toFixed(2)
+    };
+  })()`);
+
+  const ownOpacity = (sel) =>
+    evaluate(`+getComputedStyle(document.querySelector(${JSON.stringify(sel)})).opacity`);
+  const zIndexOf = (sel) =>
+    evaluate(`parseInt(getComputedStyle(document.querySelector(${JSON.stringify(sel)})).zIndex, 10)`);
+  const pointerEventsOf = (sel) =>
+    evaluate(`getComputedStyle(document.querySelector(${JSON.stringify(sel)})).pointerEvents`);
+
+  /* 第六幕几何的「期望值」表 —— 与开发计划 §5.5 A/B/C 表逐项对齐。
+     ⚠️ 刻意在测试里**再抄一份**，而不是从 window.__nj.puzzle() 取：
+        取自己就等于什么都没断言（同源比较）。 */
+  const PUZZLE_EXPECT = {
+    'picture-01-01': { w: 241, h: 128, trayX: 901.5, trayY: 85.3, goalX: 178, goalY: 127 },
+    'picture-11-01': { w: 291, h: 158, trayX: 876.5, trayY: 369.0, goalX: 334, goalY: 485 },
+    'picture-05-01': { w: 256, h: 134, trayX: 894.0, trayY: 679.7, goalX: 438, goalY: 255 },
+    'picture-03-02': { w: 241, h: 131, trayX: 901.5, trayY: 83.8, goalX: 577, goalY: 126 },
+    'picture-09-02': { w: 192, h: 207, trayX: 926.0, trayY: 344.5, goalX: 626, goalY: 311 },
+    'picture-10-02': { w: 210, h: 139, trayX: 917.0, trayY: 677.2, goalX: 178, goalY: 506 },
+    'picture-06-03': { w: 238, h: 201, trayX: 903.0, trayY: 48.8, goalX: 581, goalY: 159 },
+    'picture-04-03': { w: 206, h: 240, trayX: 919.0, trayY: 328.0, goalX: 178, goalY: 184 },
+    'picture-08-03': { w: 306, h: 213, trayX: 869.0, trayY: 640.2, goalX: 334, goalY: 318 }
+  };
+  const PUZZLE_WAVES_EXPECT = [
+    ['picture-01-01', 'picture-11-01', 'picture-05-01'],
+    ['picture-03-02', 'picture-09-02', 'picture-10-02'],
+    ['picture-06-03', 'picture-04-03', 'picture-08-03']
+  ];
+
+  /* ================= 用例 a6：第六幕 C1 / C2 结构、几何与入场 =================
+     需求 §9.3 / §9.4。守 R24（#act6 门控）、R25（C5 三件各自门控）。 */
+  async function caseA6() {
+    // 从「纸片可点」开始逐帧观察 C1 / C2，顺便量「自动参考图」的真实停留时长
+    await toAct5Hand();
+    await click('#btn-papers');
+    await waitFor(`document.getElementById('act6').classList.contains('active')`, 20000, '第六幕激活');
+
+    const t0 = Date.now();
+    let tIn = 0, tOut = 0;
+    while (Date.now() - t0 < 20000) {
+      const st = (await njState()).act6;
+      if (!tIn && st.smallPictureIn) tIn = Date.now();
+      if (tIn && !st.smallPictureIn) { tOut = Date.now(); break; }
+      await sleep(40);
+    }
+
+    // --- C1：黑幕淡出露出木桌 → 画框底罩 / 静态底同帧淡入 ---
+    await waitFor(`+getComputedStyle(document.getElementById('blackout')).opacity === 0`, 8000, '黑幕淡出完成');
+    const bg = await box('#bg-picture');
+    assertEq('a6 bg-picture 左边缘 = 0', bg.left, 0, 0);
+    assertEq('a6 bg-picture 顶边 = 0', bg.top, 0, 0);
+    assertEq('a6 bg-picture 尺寸 1200x896（全屏木桌）', bg.width * 1000 + bg.height, 1200896, 0);
+    assertEq('a6 bg-picture 已成功解码', await evaluate(`(() => { const e = document.getElementById('bg-picture');
+      return e.naturalWidth * 10000 + e.naturalHeight; })()`), 12000896, 0);
+    assertEq('a6 bg-picture 常驻可见（不靠 .in，由黑幕淡出露出）', await effOpacity('#bg-picture'), 1, 0.02);
+    assertTrue('a6 bg-picture 自身不带 .in（不是「再淡入一次」）',
+      !(await hasClass('#bg-picture', 'in')));
+
+    const pl = await box('#picture-line');
+    assertEq('a6 picture-line 左边缘 = 175', pl.left, 175, 0);
+    assertEq('a6 picture-line 顶边 = 124', pl.top, 124, 0);
+    assertEq('a6 picture-line 尺寸 646x522', pl.width * 1000 + pl.height, 646522, 0);
+    assertEq('a6 picture-line 已淡入', await effOpacity('#picture-line'), 1, 0.02);
+
+    const pm = await box('#piece-many');
+    assertEq('a6 piece-many 左边缘 = 178', pm.left, 178, 0);
+    assertEq('a6 piece-many 顶边 = 126（Q47 与 all-picture 同槽，取 126 而非 127）', pm.top, 126, 0);
+    assertEq('a6 piece-many 尺寸 640x517', pm.width * 1000 + pm.height, 640517, 0);
+    assertEq('a6 piece-many 已淡入', await effOpacity('#piece-many'), 1, 0.02);
+
+    const ap = await box('#all-picture');
+    assertEq('a6 all-picture 与 piece-many 同槽（left）', ap.left - pm.left, 0, 0);
+    assertEq('a6 all-picture 与 piece-many 同槽（top）', ap.top - pm.top, 0, 0);
+    assertEq('a6 all-picture 与 piece-many 同尺寸', ap.width * 1000 + ap.height, 640517, 0);
+
+    // 层序：画框底罩(3) 必须**低于**静态底(4)，否则拼好的画会被那层深色罩暗掉
+    const zLine = await zIndexOf('#picture-line');
+    const zMany = await zIndexOf('#piece-many');
+    assertTrue('a6 层序：picture-line(' + zLine + ') < piece-many(' + zMany + ')（底罩不得罩暗拼图）',
+      zLine < zMany);
+    assertEq('a6 picture-line 幕内 z = 3', zLine, 3, 0);
+    assertEq('a6 piece-many 幕内 z = 4', zMany, 4, 0);
+
+    // --- C2：底板自右向左滑入 → 两钮自左向右滑入 ---
+    await waitFor(`window.__nj.state().act6.framePictureIn === true`, 10000, '底板滑入');
+    await waitFor(`window.__nj.state().act6.btnPictureIn === true`, 15000, 'btn-picture 滑入');
+    await sleep(300);
+
+    const fp = await box('#frame-picture');
+    assertEq('a6 frame-picture 左边缘 = 844（right 0）', fp.left, 844, 0);
+    assertEq('a6 frame-picture 顶边 = 0', fp.top, 0, 0);
+    assertEq('a6 frame-picture 右边缘贴画面右 = 0', fp.fromRight, 0, 0);
+    assertEq('a6 frame-picture 尺寸 356x896（盖住木桌右半边）', fp.width * 1000 + fp.height, 356896, 0);
+    assertEq('a6 frame-picture 已成功解码', await evaluate(`document.getElementById('frame-picture').naturalWidth`), 356, 0);
+    assertEq('a6 frame-picture 已滑入到位（opacity 1）', await effOpacity('#frame-picture'), 1, 0.02);
+    // 层序：底板(2) 必须**低于**碎片层(10)，否则碎片会被整块底板盖住
+    const zFrame = await zIndexOf('#frame-picture');
+    const zLayer = await zIndexOf('#piece-layer');
+    assertTrue('a6 层序：frame-picture(' + zFrame + ') < piece-layer(' + zLayer + ')（底板不得盖住碎片）',
+      zFrame < zLayer);
+
+    const ba = await box('#btn-again');
+    assertEq('a6 btn-again 左边缘 = 52', ba.left, 52, 0);
+    assertEq('a6 btn-again 顶边 = 15', ba.top, 15, 0);
+    assertEq('a6 btn-again 尺寸 103x113', ba.width * 1000 + ba.height, 103113, 0);
+    const bp = await box('#btn-picture');
+    assertEq('a6 btn-picture 左边缘 = 52', bp.left, 52, 0);
+    assertEq('a6 btn-picture 顶边 = 703（bottom 80）', bp.top, 703, 0);
+    assertEq('a6 btn-picture 底边距画面底 = 80', bp.fromBottom, 80, 0);
+    assertEq('a6 btn-picture 尺寸 103x113', bp.width * 1000 + bp.height, 103113, 0);
+    assertEq('a6 两钮纵向相距 = 688', bp.top - ba.top, 688, 0);
+    assertTrue('a6 btn-again 可点击（C5 之前全程可点）', (await box('#btn-again')).pointerEvents === 'auto');
+    assertTrue('a6 btn-picture 可点击（C5 之前全程可点）', (await box('#btn-picture')).pointerEvents === 'auto');
+    assertEq('a6 两钮幕内 z = 40', await zIndexOf('#btn-again'), 40, 0);
+    await shot('a6-1-c1c2');
+
+    // --- 参考缩略图 ---
+    const sp = await box('#small-picture');
+    assertEq('a6 small-picture 左边缘 = 180', sp.left, 180, 0);
+    assertEq('a6 small-picture 顶边 = 666（bottom 24）', sp.top, 666, 0);
+    assertEq('a6 small-picture 底边距画面底 = 24', sp.fromBottom, 24, 0);
+    assertEq('a6 small-picture 尺寸 256x206', sp.width * 1000 + sp.height, 256206, 0);
+    assertTrue('a6 small-picture 不可点击（pointer-events:none，不挡碎片）',
+      sp.pointerEvents === 'none');
+    assertTrue('a6 small-picture 与拼图区不重叠（下边缘 872 > 画框下边缘 643）',
+      sp.top >= 126 + pm.height);
+    assertTrue('a6 自动参考图确实出现过（C2 末尾自动显示一次，Q50）', tIn > 0, 'tIn = ' + tIn);
+    assertTrue('a6 自动参考图已自动淡出（不等玩家操作）', tOut > 0, 'tOut = ' + tOut);
+    assertTrue('a6 自动那次停留 ≈ 2s（AUTO_HINT_MS = 2000，Q50）',
+      (tOut - tIn) >= 1700 && (tOut - tIn) <= 2600, '实测 ' + (tOut - tIn) + 'ms');
+
+    const pz = await evaluate('window.__nj.puzzle()');
+    assertEq('a6 AUTO_HINT_MS = 2000（自动那次，Q50）', pz.autoHintMs, 2000, 0);
+    assertEq('a6 MANUAL_HINT_MS = 3000（手动那次，Q51 —— 与自动那次**不同是有意的**）',
+      pz.manualHintMs, 3000, 0);
+    assertEq('a6 HIT_TOLERANCE = 30（Q48 未答复项按默认值实现）', pz.tolerance, 30, 0);
+    assertTrue('a6 RESET_SCOPE = act6（Q45 重置本幕，不是整局重开）', pz.resetScope === 'act6');
+
+    // --- C5 三件：各自带 opacity:0 门控 + 层级必须在幕内画面元素之上（R25 / Q55） ---
+    assertEq('a6 #shadow6 自带 opacity:0 门控（幕级门控兜不住，守 R25）', await ownOpacity('#shadow6'), 0, 0.01);
+    assertEq('a6 #goal02 自带 opacity:0 门控', await ownOpacity('#goal02'), 0, 0.01);
+    assertEq('a6 #continue6 自带 opacity:0 门控', await ownOpacity('#continue6'), 0, 0.01);
+    assertEq('a6 C1~C4 期间 #shadow6 的有效可见度恒为 0', await effOpacity('#shadow6'), 0, 0.01);
+    /* ⚠️ 实测踩到的坑（v2.15 修复）：`opacity:0` **不阻止**元素接收指针事件。
+       #shadow6 是全屏(1200x896)、z=90 的层，若不禁用命中，它会在 C1~C4 期间
+       吞掉全幕的每一次按下 —— 表现为「碎片怎么拖都拖不动、两钮也点不动」，
+       而所有坐标 / 类名 / opacity 断言全是绿的（第四幕没暴露这个问题，
+       因为 #shadow 躲在整幕 pointer-events:none 的 #act4 里）。 */
+    assertTrue('a6 #shadow6 不可被命中（pointer-events:none）',
+      (await pointerEventsOf('#shadow6')) === 'none');
+    assertTrue('a6 #goal02 不可被命中（它落下后正好压住左侧画框区）',
+      (await pointerEventsOf('#goal02')) === 'none');
+    assertTrue('a6 画框区内的命中目标不是蒙黑层 / Goal 卡 / 完成态整图（不遮挡碎片拖拽）',
+      await evaluate(`(() => {
+        const r = document.getElementById('stage').getBoundingClientRect();
+        const s = r.width / ${STAGE_W};
+        const el = document.elementFromPoint(r.left + 300 * s, r.top + 300 * s);
+        return !!el && ['shadow6', 'goal02', 'all-picture'].indexOf(el.id) === -1;
+      })()`));
+    const g2 = await box('#goal02');
+    assertEq('a6 goal02 左边缘 = 221（复用第四幕位置，Q52）', g2.left, 221, 0);
+    assertEq('a6 goal02 顶边 = 120', g2.top, 120, 0);
+    assertEq('a6 goal02 尺寸 758x579', g2.width * 1000 + g2.height, 758579, 0);
+    assertEq('a6 goal02 与第四幕 goal01 版式一致（底边距 197）', g2.fromBottom, 197, 0);
+    const c6 = await box('#continue6');
+    assertEq('a6 continue6 左边缘 = 467.5（复用第四幕位置，Q52）', c6.left, 467.5, 0.6);
+    assertEq('a6 continue6 顶边 = 770', c6.top, 770, 0.6);
+    assertEq('a6 continue6 底边距画面底 = 95', c6.fromBottom, 95, 0.6);
+    assertEq('a6 continue6 尺寸 265x31', c6.width * 1000 + c6.height, 265031, 0);
+    assertTrue('a6 Continue 滑入前不可点击（pointer-events:none）', c6.pointerEvents === 'none');
+    assertEq('a6 Continue 与 Goal 卡间距 = 71（与第四幕完全一致）',
+      c6.top - (g2.top + g2.height), 71, 0.6);
+
+    const zShadow6 = await zIndexOf('#shadow6');
+    const zAllPic = await zIndexOf('#all-picture');
+    const zSmall = await zIndexOf('#small-picture');
+    const zBtn = await zIndexOf('#btn-again');
+    const zCont6 = await zIndexOf('#continue6');
+    const zGoal2 = await zIndexOf('#goal02');
+    assertEq('a6 层序：shadow6 幕内 z = 90', zShadow6, 90, 0);
+    assertTrue('a6 层序：shadow6(90) > all-picture(30)（蒙黑必须盖住整图）', zShadow6 > zAllPic);
+    assertTrue('a6 层序：shadow6(90) > 两钮(40)（蒙黑必须盖住圆钮）', zShadow6 > zBtn);
+    assertTrue('a6 层序：shadow6(90) > small-picture(41)', zShadow6 > zSmall);
+    assertTrue('a6 层序：goal02(95) 在蒙黑之上', zGoal2 > zShadow6);
+    assertTrue('a6 层序：continue6(96) 在 Goal 卡之上', zCont6 > zGoal2);
+    assertTrue('a6 #act6 建立自包含堆叠上下文（isolation:isolate）',
+      (await evaluate(`getComputedStyle(document.getElementById('act6')).isolation`)) === 'isolate');
+
+    // --- C3 第 1 波已投放（C2 缩略图淡出后自动出，Q50「先后出现」） ---
+    await waitFor(`document.querySelectorAll('#piece-layer .piece').length === 3`, 12000, '第 1 波 3 张');
+    assertEq('a6 第 1 波 3 张在底板', await pieceCount('piece-layer'), 3, 0);
+    assertEq('a6 拖拽层此刻为空', await pieceCount('piece-drag'), 0, 0);
+    assertTrue('a6 #act6 未挂 .ui-out（本幕不设 UI 淡出，Q55）',
+      !(await hasClass('#act6', 'ui-out')));
+    assertTrue('a6 第六幕全程 BGM 保持停止（Q32）', (await njState()).bgm.paused === true);
+  }
+
+  /* ================= 用例 a6b：第六幕 C3 拼图玩法（全片首次拖拽） =================
+     需求 §9.5。纯判定矩阵 + 三波顺序 + 拖拽链路 + 吸附/飞回 + 重来 + 参考图 + 缩放补偿。 */
+  async function caseA6b() {
+    await toAct6Play();
+    const pz = await evaluate('window.__nj.puzzle()');
+
+    // ---------- ① 三波顺序与组成（与需求 §9.5.1 逐字一致） ----------
+    assertEq('a6b 波数 = 3', pz.waves.length, 3, 0);
+    for (let i = 0; i < 3; i++) {
+      assertTrue('a6b 第 ' + (i + 1) + ' 波组成与需求 §9.5.1 逐字一致',
+        JSON.stringify(pz.waves[i]) === JSON.stringify(PUZZLE_WAVES_EXPECT[i]),
+        JSON.stringify(pz.waves[i]));
+    }
+
+    // ---------- ② 18 个坐标（9 张 × 底板初始 / 目标）逐张核对 ----------
+    for (const id of Object.keys(PUZZLE_EXPECT)) {
+      const e = PUZZLE_EXPECT[id], m = pz.pieces[id];
+      assertTrue('a6b ' + id + ' 几何与计划 §5.5 B/C 表逐项一致',
+        !!m && m.w === e.w && m.h === e.h &&
+        Math.abs(m.trayX - e.trayX) <= 0.01 && Math.abs(m.trayY - e.trayY) <= 0.01 &&
+        m.goalX === e.goalX && m.goalY === e.goalY,
+        JSON.stringify(m));
+      const c = pz.goalCenter[id];
+      assertEq('a6b ' + id + ' 目标中心 x = ' + (e.goalX + e.w / 2), c.x, e.goalX + e.w / 2, 0.001);
+      assertEq('a6b ' + id + ' 目标中心 y = ' + (e.goalY + e.h / 2), c.y, e.goalY + e.h / 2, 0.001);
+    }
+    // 容差 30 必须**不到**最近两个目标中心间距的一半（否则会「落进别人的位子」）
+    let minGap = Infinity, gapPair = '';
+    const ids = Object.keys(PUZZLE_EXPECT);
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const a = PUZZLE_EXPECT[ids[i]], b = PUZZLE_EXPECT[ids[j]];
+        const ax = a.goalX + a.w / 2, ay = a.goalY + a.h / 2;
+        const bx = b.goalX + b.w / 2, by = b.goalY + b.h / 2;
+        const d = Math.sqrt((ax - bx) * (ax - bx) + (ay - by) * (ay - by));
+        if (d < minGap) { minGap = d; gapPair = ids[i] + ' ↔ ' + ids[j]; }
+      }
+    }
+    assertEq('a6b 9 个目标中心两两最近 = 68.0px（' + gapPair + '）', +minGap.toFixed(1), 68.0, 0.1);
+    assertTrue('a6b 容差 30 < 最近间距的一半 ' + (minGap / 2).toFixed(1) + '（不会落进别人的位子）',
+      pz.tolerance < minGap / 2);
+
+    // ---------- ③ 纯判定矩阵：喂坐标给 judge()，不碰画面（9 张 × 4 用例） ----------
+    for (const id of ids) {
+      const e = PUZZLE_EXPECT[id];
+      const cx = e.goalX + e.w / 2, cy = e.goalY + e.h / 2;
+      // 最近邻目标中心
+      let nn = null, nnD = Infinity;
+      for (const other of ids) {
+        if (other === id) continue;
+        const o = PUZZLE_EXPECT[other];
+        const ox = o.goalX + o.w / 2, oy = o.goalY + o.h / 2;
+        const d = Math.sqrt((cx - ox) * (cx - ox) + (cy - oy) * (cy - oy));
+        if (d < nnD) { nnD = d; nn = other; }
+      }
+      const no = PUZZLE_EXPECT[nn];
+      const nx = no.goalX + no.w / 2, ny = no.goalY + no.h / 2;
+
+      assertTrue('a6b ' + id + ' 判定：精确落在目标中心 → 命中',
+        await evaluate(`window.__nj.judgeAt(${JSON.stringify(id)}, ${cx}, ${cy})`));
+      assertTrue('a6b ' + id + ' 判定：恰好 30px 偏移 → 仍命中（容差边界含等号）',
+        await evaluate(`window.__nj.judgeAt(${JSON.stringify(id)}, ${cx + 30}, ${cy})`));
+      assertTrue('a6b ' + id + ' 判定：30.5px 偏移 → 飞回（差一点就是差一点）',
+        !(await evaluate(`window.__nj.judgeAt(${JSON.stringify(id)}, ${cx + 30.5}, ${cy})`)));
+      assertTrue('a6b ' + id + ' 判定：落在最近邻 ' + nn + ' 的目标中心 → 不误判命中（间距 ' + nnD.toFixed(1) + 'px）',
+        !(await evaluate(`window.__nj.judgeAt(${JSON.stringify(id)}, ${nx}, ${ny})`)));
+    }
+    // 判据只看「中心距」，与「是否完整落在画框内」无关（与第三幕 inBody 的口径相反）
+    assertTrue('a6b 判据是「中心距」而非「整张落在框内」（照搬第三幕 inBody 会错）',
+      await evaluate(`window.__nj.judgeAt('picture-08-03', ${334 + 306 / 2 + 25}, ${318 + 213 / 2 + 5})`));
+
+    // ---------- ④ 第 1 波：底板初始坐标 + 拖拽链路 ----------
+    const b0 = await pieceBox('picture-01-01');
+    assertTrue('a6b 第 1 波碎片挂在 #piece-layer（已落位层）', b0 && b0.parent === 'piece-layer');
+    assertEq('a6b 01-01 底板初始 left = 901.5', b0.left, 901.5, 0.6);
+    assertEq('a6b 01-01 底板初始 top = 85.3', b0.top, 85.3, 0.6);
+    assertEq('a6b 01-01 显示尺寸 = 241x128（原尺寸不缩放）', b0.width * 1000 + b0.height, 241128, 0);
+
+    await mouseDownAt(b0.cx, b0.cy);
+    await sleep(80);
+    const lifted = await evaluate(`(() => {
+      const sel = '.piece[data-piece="picture-01-01"]';
+      const el = document.querySelector('#piece-drag ' + sel);
+      if (!el) return null;
+      const m = getComputedStyle(el).transform;
+      const n = m.slice(m.indexOf('(') + 1, m.lastIndexOf(')')).split(',').map(Number);
+      return { parent: el.parentElement.id, lift: el.classList.contains('lift'),
+               scale: n.length === 6 ? n[0] : n[0],
+               cursor: getComputedStyle(el).cursor };
+    })()`);
+    assertTrue('a6b 拿起：碎片已从底板换父节点到拖拽层 #piece-drag',
+      lifted && lifted.parent === 'piece-drag');
+    assertTrue('a6b 拿起：已加 .lift', lifted && lifted.lift === true);
+    assertEq('a6b 拿起：放大到 1.05', lifted.scale, 1.05, 0.01);
+    assertTrue('a6b 拿起：光标变为 grabbing', lifted && lifted.cursor === 'grabbing', lifted && lifted.cursor);
+    assertTrue('a6b 拿起期间 dragging 非空', (await njState()).act6.dragging === true);
+
+    await mouseMoveAt(b0.cx + 120, b0.cy + 60);
+    await sleep(150);
+    const during = await pieceBox('picture-01-01');
+    assertEq('a6b 跟随：碎片中心对齐指针 x（经 rAF 节流落地）', during.cx, b0.cx + 120, 1.5);
+    assertEq('a6b 跟随：碎片中心对齐指针 y', during.cy, b0.cy + 60, 1.5);
+    // 跟随期间不得有 left/top 过渡（否则每帧都追赶、画面拖影）
+    assertTrue('a6b 跟随期间 left/top 无过渡（inline transition = none，防拖影）',
+      (await evaluate(`document.querySelector('#piece-drag .piece[data-piece="picture-01-01"]').style.transition`)) === 'none');
+
+    // ---------- ⑤ 命中：吸附到精确目标坐标 ----------
+    const g1 = pz.goalCenter['picture-01-01'];
+    await mouseMoveAt(g1.x, g1.y);
+    await mouseUpAt(g1.x, g1.y);
+    await waitFor(`window.__nj.state().act6.count === 1`, 6000, '01-01 落位');
+    await sleep(400);
+    const snap1 = await pieceBox('picture-01-01');
+    assertEq('a6b 命中：吸附到精确目标 left = 178', snap1.left, 178, 0.6);
+    assertEq('a6b 命中：吸附到精确目标 top = 127', snap1.top, 127, 0.6);
+    assertTrue('a6b 命中：碎片回到已落位层 #piece-layer', snap1.parent === 'piece-layer');
+    assertTrue('a6b 命中：已脱离 .lift（缩放回 1.0）',
+      !(await evaluate(`document.querySelector('#piece-layer .piece[data-piece="picture-01-01"]').classList.contains('lift')`)));
+    assertEq('a6b 命中：计数 +1', (await njState()).act6.count, 1, 0);
+    assertEq('a6b 命中：已锁定（lockedIds）', (await njState()).act6.locked, 1, 0);
+    assertTrue('a6b 命中后 dragging 已清空', (await njState()).act6.dragging === false);
+    await shot('a6b-1-snapped');
+
+    // 已落位碎片不可再拖
+    await mouseDownAt(snap1.cx, snap1.cy);
+    await sleep(100);
+    assertTrue('a6b 已落位碎片不可再拖（dragging 仍为空）', (await njState()).act6.dragging === false);
+    assertTrue('a6b 已落位碎片形状未被改变（无旋转：transform 无 rotate）',
+      await evaluate(`(() => {
+        const el = document.querySelector('#piece-layer .piece[data-piece="picture-01-01"]');
+        const m = getComputedStyle(el).transform;
+        return m === 'none' || m.indexOf('matrix(1, 0, 0, 1') === 0;
+      })()`));
+    await mouseUpAt(snap1.cx, snap1.cy);
+    await sleep(200);
+
+    // ---------- ⑥ 未命中：飞回底板原位、不计数、仍可再拖 ----------
+    const b11 = await pieceBox('picture-11-01');
+    await dragCanvas(b11.cx, b11.cy, 900, 800);   // 离全部目标位都很远
+    await waitFor(`window.__nj.state().act6.dragging === false`, 4000, '松手');
+    await sleep(450);
+    const back = await pieceBox('picture-11-01');
+    assertEq('a6b 未命中：飞回底板原位 left = 876.5', back.left, 876.5, 0.6);
+    assertEq('a6b 未命中：飞回底板原位 top = 369', back.top, 369, 0.6);
+    assertEq('a6b 未命中：不计数', (await njState()).act6.count, 1, 0);
+    assertTrue('a6b 未命中：仍可再拖（未锁定）', back.locked === false);
+    await shot('a6b-2-flyback');
+
+    // ---------- ⑦ 重来（Q45 重置本幕） ----------
+    await waitFor(`window.__nj.state().busy === false && window.__nj.state().animLock === false`, 6000, '解锁');
+    await click('#btn-again');
+    await sleep(700);
+    assertEq('a6b 重来：已落位碎片全部清空（计数归零）', (await njState()).act6.count, 0, 0);
+    assertEq('a6b 重来：回到第 1 波', (await njState()).act6.wave, 0, 0);
+    assertEq('a6b 重来：底板重新出现第 1 波 3 张', await pieceCount('piece-layer'), 3, 0);
+    assertEq('a6b 重来：锁定表已清空', (await njState()).act6.locked, 0, 0);
+    assertTrue('a6b 重来不重播 C1（静态底仍在）', (await njState()).act6.pieceManyIn === true);
+    assertTrue('a6b 重来不重播 C2（底板 / 两钮仍在）',
+      (await njState()).act6.framePictureIn === true && (await njState()).act6.btnAgainIn === true);
+    await shot('a6b-3-reset');
+
+    // ---------- ⑧ 看参考图（Q51 手动 3s + 重复点击重置 + 不打断拼图） ----------
+    await waitFor(`window.__nj.state().busy === false`, 5000, '解锁');
+    await click('#btn-picture');
+    await waitFor(`window.__nj.state().act6.smallPictureIn === true`, 3000, '手动参考图出现');
+    assertTrue('a6b 参考图期间 busy 仍为 false（不打断拼图 —— 不能用 anim() 写成阻塞）',
+      (await njState()).busy === false);
+    await sleep(1500);
+    await click('#btn-picture');                    // 重复点击 → 重置计时（不是叠加）
+    const tReset = Date.now();
+    await waitFor(`window.__nj.state().act6.smallPictureIn === false`, 8000, '手动参考图淡出');
+    const lived = Date.now() - tReset;
+    assertTrue('a6b 重复点击重置 3s 计时（实测 ' + lived + 'ms，落在 2.5–3.6s）',
+      lived >= 2500 && lived <= 3600, '实测 ' + lived + 'ms');
+    // 参考图显示期间仍能拖拽
+    await click('#btn-picture');
+    await waitFor(`window.__nj.state().act6.smallPictureIn === true`, 3000, '参考图再次出现');
+    const b05 = await pieceBox('picture-05-01');
+    await mouseDownAt(b05.cx, b05.cy);
+    await sleep(100);
+    assertTrue('a6b 参考图显示期间碎片仍可被拿起（不打断拼图）',
+      (await njState()).act6.dragging === true);
+    await mouseUpAt(b05.cx, b05.cy);
+    await sleep(400);
+    assertEq('a6b 参考图期间误松手 → 飞回不计数', (await njState()).act6.count, 0, 0);
+
+    // ---------- ⑨ 三波推进 + 9/9 ----------
+    await waitFor(`window.__nj.state().busy === false && window.__nj.state().animLock === false`, 6000, '解锁');
+    const solved = await solveAllPieces();
+    assertEq('a6b 三波走完共落位 9 张', solved, 9, 0);
+    assertEq('a6b 9/9 后计数 = 9（本幕无最低阈值，必须全满）', (await njState()).act6.count, 9, 0);
+    assertEq('a6b 9/9 后底板已空（落位碎片全部离开底板、该位置不补位）',
+      await pieceCount('piece-layer'), 9, 0);
+    assertEq('a6b 9/9 后拖拽层为空', await pieceCount('piece-drag'), 0, 0);
+    assertTrue('a6b 9/9 后 9 张全部锁定', (await njState()).act6.locked === 9);
+    await shot('a6b-4-solved');
+
+    // 逐张复核落点 = §5.5 B 表的精确目标坐标
+    for (const id of ids) {
+      const e = PUZZLE_EXPECT[id], got = await pieceBox(id);
+      assertTrue('a6b ' + id + ' 最终落点 = ' + e.goalX + ' / ' + e.goalY + '（精确吸附）',
+        got && Math.abs(got.left - e.goalX) <= 0.6 && Math.abs(got.top - e.goalY) <= 0.6,
+        JSON.stringify(got));
+      // 图片真的解码出来了、且**原始尺寸** = 坐标表里的 w/h（坐标表与素材必须逐张一致）
+      assertEq('a6b ' + id + ' 素材原始尺寸 = ' + e.w + 'x' + e.h,
+        await evaluate(`(() => { const el = document.querySelector('#piece-layer .piece[data-piece=${JSON.stringify(id)}]');
+          return el ? el.naturalWidth * 10000 + el.naturalHeight : 0; })()`), e.w * 10000 + e.h, 0);
+    }
+  }
+
+  /* ================= 用例 a6c：第六幕 C4 完成态 + C5 收尾 =================
+     需求 §9.6 / §9.7。守 Q52–Q56：坐标沿用第四幕、幕内一律不淡出、两钮点击屏蔽、点击转黑幕即终点。 */
+  async function caseA6c() {
+    await toAct6Play();
+    await solveAllPieces();
+    await waitFor(`window.__nj.state().act6.count === 9`, 6000, '9/9');
+
+    /* 在页面内给 C4 的「发光 → 蒙黑」装计时探针。
+       ⚠️ 不能在测试端用 Date.now() 卡点 —— 中间夹着截图与多次 CDP 往返，
+          数百毫秒的偏差会把 2s 量成 1s（首版就是这么误报的）。 */
+    await evaluate(`(() => {
+      window.__c4 = { tGlow: 0, tShadow: 0 };
+      const t0 = performance.now();
+      window.__c4Timer = setInterval(() => {
+        const ap = document.getElementById('all-picture');
+        const sh = document.getElementById('shadow6');
+        if (!window.__c4.tGlow && ap.classList.contains('glow')) window.__c4.tGlow = performance.now();
+        if (window.__c4.tGlow && !window.__c4.tShadow && sh.classList.contains('in')) {
+          window.__c4.tShadow = performance.now();
+          clearInterval(window.__c4Timer);
+        }
+        if (performance.now() - t0 > 20000) clearInterval(window.__c4Timer);
+      }, 10);
+      return true;
+    })()`);
+
+    // ---------- C4：all-picture 淡入 + 常驻发光 ----------
+    await waitFor(`window.__nj.state().act6.allPictureIn === true`, 8000, 'all-picture 淡入');
+    await waitFor(`window.__nj.state().act6.allPictureGlow === true`, 8000, '发光挂上');
+    await sleep(300);
+    assertEq('a6c all-picture 已淡入（盖住拼合结果）', await effOpacity('#all-picture'), 1, 0.02);
+    assertEq('a6c all-picture 左边缘 = 178（与静态底同槽）', (await box('#all-picture')).left, 178, 0);
+    assertTrue('a6c 发光是 CSS 关键帧（素材里没有发光版整图，Q49）',
+      (await evaluate(`getComputedStyle(document.getElementById('all-picture')).animationName`)) === 'picGlow');
+    assertTrue('a6c 发光周期 1.6s、无限循环',
+      (await evaluate(`getComputedStyle(document.getElementById('all-picture')).animationIterationCount`)) === 'infinite');
+    assertTrue('a6c C4 期间两钮仍可点（需求 §9.6 第 4 条）',
+      (await box('#btn-again')).pointerEvents === 'auto' &&
+      (await box('#btn-picture')).pointerEvents === 'auto');
+    assertTrue('a6c 9/9 后第 9 张碎片停在精确目标位（拼合严丝合缝）',
+      await evaluate(`(() => {
+        const el = document.querySelector('#piece-layer .piece[data-piece="picture-08-03"]');
+        return !!el && Math.abs(parseFloat(el.style.left) - 334) < 0.6 && Math.abs(parseFloat(el.style.top) - 318) < 0.6;
+      })()`));
+    await shot('a6c-1-glow');
+
+    // ---------- 等满 2s → 蒙黑出现（Q54：2s = 进 C5 的等待，不是「亮 2s 就熄灭」） ----------
+    await startDropProbe('goal02', 9000);
+    await waitFor(`window.__nj.state().act6.shadow6In === true`, 10000, '蒙黑开始淡入');
+    const c4 = await evaluate(`({ d: Math.round(window.__c4.tShadow - window.__c4.tGlow), tGlow: window.__c4.tGlow, tShadow: window.__c4.tShadow })`);
+    assertTrue('a6c 9/9 发光满 ≈2s 才出蒙黑（实测 ' + c4.d + 'ms，Q54）',
+      c4.d >= 1800 && c4.d <= 2400, JSON.stringify(c4));
+    assertTrue('a6c 发光被压暗但**不熄灭**（glow 类未摘除，Q54）',
+      (await njState()).act6.allPictureGlow === true);
+
+    // ---------- C5 第 1 拍：蒙黑 + 同一帧关掉两钮点击（Q56） ----------
+    await waitFor(`+getComputedStyle(document.getElementById('shadow6')).opacity === 1`, 6000, '蒙黑到顶');
+    await sleep(200);
+    assertEq('a6c shadow6 已淡入（70% 蒙黑）', await effOpacity('#shadow6'), 1, 0.02);
+    assertTrue('a6c 蒙黑层是真半透明（平均 α≈70%，不是纯黑）',
+      await evaluate(`(() => new Promise((resolve) => {
+        const im = new Image();
+        im.onload = () => {
+          const c = document.createElement('canvas');
+          c.width = im.naturalWidth; c.height = im.naturalHeight;
+          const x = c.getContext('2d');
+          x.drawImage(im, 0, 0);
+          const d = x.getImageData(600, 400, 1, 1).data;
+          resolve(d[0] === 0 && d[1] === 0 && d[2] === 0 && d[3] > 150 && d[3] < 210);
+        };
+        im.src = 'assets/screen4/shadow.png';
+      }))()`));
+
+    // Q55：幕内一切**保留**、不做任何淡出（与第四幕做法相反）
+    assertEq('a6c Q55：btn-again 视觉保留（被压暗但仍可见，不淡出）', await effOpacity('#btn-again'), 1, 0.02);
+    assertEq('a6c Q55：btn-picture 视觉保留', await effOpacity('#btn-picture'), 1, 0.02);
+    assertEq('a6c Q55：右侧底板保留', await effOpacity('#frame-picture'), 1, 0.02);
+    assertEq('a6c Q55：完成态整图保留', await effOpacity('#all-picture'), 1, 0.02);
+    assertTrue('a6c Q55：两钮均未挂 .out（本幕不存在 UI 淡出）',
+      !(await hasClass('#btn-again', 'out')) && !(await hasClass('#btn-picture', 'out')));
+    assertTrue('a6c Q55：本幕不设 .ui-out（与第四幕「UI 淡出」做法相反）',
+      !(await hasClass('#act6', 'ui-out')));
+
+    // Q56：视觉保留、点击屏蔽
+    assertTrue('a6c Q56：btn-again 已屏蔽点击（pointer-events:none）',
+      (await pointerEventsOf('#btn-again')) === 'none');
+    assertTrue('a6c Q56：btn-picture 已屏蔽点击（pointer-events:none）',
+      (await pointerEventsOf('#btn-picture')) === 'none');
+    assertTrue('a6c Q56：绝不可给 #act6 整幕设 pointer-events:none（拖拽与 Continue 都要真实点击）',
+      (await pointerEventsOf('#act6')) !== 'none');
+    // 真的点一次两钮坐标 → 幕不得被重置 / 参考图不得亮起
+    await clickCanvas(103.5, 71.5);      // btn-again 中心 (52+51.5, 15+56.5)
+    await sleep(400);
+    assertEq('a6c Q56：点 btn-again 坐标 → 幕未被重置（9 张仍全在）',
+      (await njState()).act6.count, 9, 0);
+    await clickCanvas(103.5, 759.5);     // btn-picture 中心 (52+51.5, 703+56.5)
+    await sleep(400);
+    assertTrue('a6c Q56：点 btn-picture 坐标 → 参考图不被亮起',
+      (await njState()).act6.smallPictureIn === false);
+    assertTrue('a6c Q56：屏蔽后 C5 仍在正常推进（Goal 卡未被打断）',
+      (await njState()).act6.shadow6In === true);
+    await shot('a6c-2-mask');
+
+    // ---------- C5 第 2 拍：Goal 2 自上而下落下 ----------
+    await waitFor(`document.getElementById('goal02').classList.contains('in')`, 8000, 'goal02 落下');
+    await sleep(600);
+    const g2 = await box('#goal02');
+    assertEq('a6c goal02 落点 left = 221（复用第四幕）', g2.left, 221, 0);
+    assertEq('a6c goal02 落点 top = 120', g2.top, 120, 0);
+    assertEq('a6c goal02 尺寸 758x579（与 goal01 同模板）', g2.width * 1000 + g2.height, 758579, 0);
+    assertEq('a6c goal02 已完全可见', await effOpacity('#goal02'), 1, 0.02);
+
+    const drop = await readDropProbe();
+    assertTrue('a6c goal02 落下动作：探针采到足够的动画帧样本', drop.afterN >= 10, JSON.stringify(drop));
+    assertTrue('a6c goal02 落下动作：起点整张卡片在画布上方之外（下边缘 699+ty ≤ 0）',
+      drop.startTy !== null && drop.startTy + 699 <= 0, 'startTy = ' + drop.startTy);
+    assertEq('a6c goal02 落下动作：起点 translateY = -720（与 goal01 完全一致）', drop.startTy, -720, 2);
+    assertTrue('a6c goal02 落下动作：落点 translateY = 0', Math.abs(drop.endTy) <= 0.5, 'endTy = ' + drop.endTy);
+    assertTrue('a6c goal02 落下动作：自上而下单调、无回弹', drop.mono === true);
+    assertTrue('a6c goal02 落下动作：拍到 ≥3 个中途态（不是瞬间闪现）', drop.midCount >= 3, 'midCount = ' + drop.midCount);
+    assertTrue('a6c goal02 落下动作：只有垂直位移（|tx| < 0.5）', drop.txMax < 0.5, 'txMax = ' + drop.txMax);
+    assertTrue('a6c goal02 落下动作：一边落一边可见（中途 opacity ≥ 0.5）',
+      drop.midOpMin !== null && drop.midOpMin >= 0.5, 'midOpMin = ' + drop.midOpMin);
+
+    // ---------- C5 第 3 拍：Continue 滑入 → 滑完才可点 ----------
+    await waitFor(`document.getElementById('continue6').classList.contains('in')`, 8000, 'Continue 滑入');
+    await sleep(700);
+    const c6 = await box('#continue6');
+    assertEq('a6c continue6 落点 left = 467.5（复用第四幕）', c6.left, 467.5, 0.6);
+    assertEq('a6c continue6 落点 top = 770', c6.top, 770, 0.6);
+    assertEq('a6c continue6 尺寸 265x31', c6.width * 1000 + c6.height, 265031, 0);
+    assertTrue('a6c Continue 滑入完成后可点击', c6.pointerEvents === 'auto');
+    assertTrue('a6c Continue 是 C5 期间唯一可点元素（两钮已屏蔽）',
+      (await pointerEventsOf('#btn-again')) === 'none' && (await pointerEventsOf('#btn-picture')) === 'none');
+    assertTrue('a6c 点击前画面尚未全黑（不自动跳转，Q20 同款）',
+      !(await hasClass('#blackout', 'in')));
+    await shot('a6c-3-goal2');
+
+    // ---------- C5 第 4 拍：点击 → 同帧三撤场 + 黑幕渐入 → 全黑滞留（终点，Q53） ----------
+    await click('#continue6');
+    await waitFor(`+getComputedStyle(document.getElementById('blackout')).opacity === 1`, 5000, '黑幕到顶（全黑）');
+    await sleep(120);
+    assertEq('a6c 点击 Continue 后 Goal 2 已撤场', await effOpacity('#goal02'), 0, 0.01);
+    assertEq('a6c 点击 Continue 后蒙黑层 shadow6 已撤场（黑幕跑完时无残留灰罩）',
+      await effOpacity('#shadow6'), 0, 0.01);
+    assertEq('a6c 点击 Continue 后 Continue 按钮已撤场', await effOpacity('#continue6'), 0, 0.01);
+    assertTrue('a6c shadow6 已挂 .out（退场压到 0.4s）', await hasClass('#shadow6', 'out'));
+    assertTrue('a6c Continue 已挂 .out（退场压到 0.15s，短于黑幕 0.4s）', await hasClass('#continue6', 'out'));
+    assertTrue('a6c Continue 已脱离 .in（不靠 0.3s 淡出拖尾）', !(await hasClass('#continue6', 'in')));
+    assertEq('a6c 终点画面纯黑', await effOpacity('#blackout'), 1, 0.01);
+    assertTrue('a6c 全黑滞留 = 全片终（不重播、不加文字、不回到第一幕）',
+      await waitFor(`window.__nj.state().act6.done === true`, 4000, '全片终标记'));
+    assertTrue('a6c 幕内「保留」的元素在点击后仍未被淡出（Q55）',
+      (await njState()).act6.allPictureGlow === true &&
+      !(await hasClass('#btn-again', 'out')) &&
+      !(await hasClass('#act6', 'ui-out')));
+    assertTrue('a6c 第六幕全程 BGM 保持停止（Q32：本幕无任何 bgm 动作）',
+      (await njState()).bgm.paused === true);
+    await shot('a6c-4-final-black');
+  }
+
+  /* ================= 用例 full4：第一 ~ 第六幕全流程（两段视频真播） =================
+     验证真实时序、终点第四次后移后的副作用与末态滞留。 */
+  async function caseFull4() {
+    await toAct3();
+    await waitFor(`document.getElementById('act3-video').currentTime > 0`, 10000, '第三幕视频开播');
+    await waitFor(`document.getElementById('chat3').classList.contains('in')`, 25000, '视频播完滑入对话框');
+    await waitFor(`document.getElementById('btn-go3').classList.contains('in')`, 25000, '第三句打完');
+    await sleep(300);
+    await click('#btn-go3');
+    await waitFor(`document.getElementById('sticker-frame').classList.contains('in')`, 10000, '面板滑入');
+    await waitFor(`document.getElementById('btn-ok').classList.contains('in')`, 12000, '按钮滑入');
+    await waitFor(`window.__nj.state().busy === false`, 8000, '演出锁释放');
+    await sleep(250);
+
+    await evaluate(`window.__nj.setRotation(0)`);
+    await place('bag', 260, 380);
+    await place('love', 420, 520);
+    await place('travel', 320, 660);
+    assertEq('full4 贴满 3 张', await placedCount(), 3);
+    await click('#btn-ok');
+    await waitFor(`document.getElementById('continue').classList.contains('in')`, 10000, 'Continue 滑入');
+    await sleep(600);
+    await click('#continue');
+    // 终点第四次后移：BGM 仍在第四幕末点击处停止，此后各幕全程静音
+    assertTrue('full4 点 Continue 后 BGM 即刻停止（停止点未变，Q32）',
+      await waitFor(`window.__nj.state().bgm.paused === true`, 4000, 'BGM 停止'));
+
+    await waitFor(`window.__nj.state().act5.outdoorIn === true`, 20000, '户外定格图淡入');
+    await waitFor(`+getComputedStyle(document.getElementById('act5-outdoor')).opacity === 1`, 4000, '户外定格图淡入完成');
+    assertTrue('full4 第五幕 video 未播放（静帧取代视频）',
+      await evaluate(`document.getElementById('act5-video').currentTime === 0`));
+    await waitFor(`document.getElementById('chat5a').classList.contains('in')`, 25000, '滑入 chat5a');
+    await waitFor(`document.getElementById('btn-go5a').classList.contains('in')`, 25000, '第 ④ 句打完');
+    await sleep(300); await click('#btn-go5a');
+    await waitFor(`document.getElementById('btn-go5a').classList.contains('in')`, 25000, '第 ⑤ 句打完');
+    await sleep(300); await click('#btn-go5a');
+    await waitFor(`document.getElementById('btn-go5b').classList.contains('in')`, 25000, '第 ⑥ 句打完');
+    await sleep(300); await click('#btn-go5b');
+    await waitFor(`document.getElementById('btn-go5b').classList.contains('in')`, 25000, '第 ⑦ 句打完');
+    await sleep(300); await click('#btn-go5b');
+    await waitFor(`window.__nj.state().act5.papersClickable === true`, 8000, '纸片可点');
+    await sleep(300);
+    await click('#btn-papers');
+
+    // 第六幕：C1 → C2 → C3（真拖 9 张）→ C4 → C5
+    await waitFor(`document.getElementById('act6').classList.contains('active')`, 20000, '第六幕激活');
+    await waitFor(`window.__nj.state().act6.pieceManyIn === true`, 10000, '静态底淡入');
+    await waitFor(`window.__nj.state().act6.btnPictureIn === true`, 15000, 'C2 完成');
+    await waitFor(`window.__nj.state().busy === false`, 15000, 'C2 锁释放');
+    assertTrue('full4 第六幕全程 BGM 保持停止',
+      (await njState()).bgm.paused === true);
+    assertTrue('full4 第五幕视频全程未播放（静帧取代）',
+      await evaluate(`document.getElementById('act5-video').currentTime === 0`));
+
+    await solveAllPieces();
+    assertEq('full4 拼图 9/9 完成', (await njState()).act6.count, 9, 0);
+    await waitFor(`window.__nj.state().act6.shadow6In === true`, 12000, 'C5 蒙黑');
+    await waitFor(`document.getElementById('continue6').classList.contains('in')`, 12000, 'Continue 滑入');
+    await sleep(700);
+    await click('#continue6');
+    await waitFor(`+getComputedStyle(document.getElementById('blackout')).opacity === 1`, 6000, '全黑到顶');
+    await sleep(200);
+    assertEq('full4 终态（第六幕末）纯黑 = 全片终', await effOpacity('#blackout'), 1, 0.01);
+    // 「全片终」标记在黑幕到顶后再滞留 400ms 才置（Q53：黑幕到顶后不回撤）
+    assertTrue('full4 终点标记已置（全黑滞留）',
+      await waitFor(`window.__nj.state().act6.done === true`, 5000, '终点标记'));
+    assertTrue('full4 末态无残留（三件已撤场）',
+      (await effOpacity('#shadow6')) === 0 && (await effOpacity('#goal02')) === 0 &&
+      (await effOpacity('#continue6')) === 0);
+    assertTrue('full4 全流程无控制台报错', errors.length === 0, errors.join(' | '));
+    await shot('full4-1-black');
+  }
+
   /* ================= 用例 full2：第一 ~ 第四幕（真实播放视频） ================= */
   async function caseFull2() {
     await toAct3();
@@ -1722,11 +2663,12 @@ const INK_TOP_FN = `(() => {
     p1: caseP1, p2: caseP2, flow: caseFlow,
     a3: caseA3, a3b: caseA3b, a3c: caseA3c, a4: caseA4, bgm: caseBgm, bgm2: caseBgm2, full2: caseFull2,
     a5: caseA5, a5b: caseA5b, full3: caseFull3,
+    a6: caseA6, a6b: caseA6b, a6c: caseA6c, full4: caseFull4,
   };
 
   for (const name of cases) {
     console.log('\n=== 用例 ' + name + ' ===');
-    if (!CASES[name]) { fail('未知用例 ' + name, '可选: gate / p1 / p2 / flow / a3 / a3b / a3c / a4 / a5 / a5b / bgm / bgm2 / full2 / full3'); continue; }
+    if (!CASES[name]) { fail('未知用例 ' + name, '可选: gate / p1 / p2 / flow / a3 / a3b / a3c / a4 / a5 / a5b / a6 / a6b / a6c / bgm / bgm2 / full2 / full3 / full4'); continue; }
     try {
       await reload();
       await CASES[name]();
