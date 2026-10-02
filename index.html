@@ -980,7 +980,8 @@
   var STAGE_H = 896;
 
   var AUDIO_SRC = 'audio/toggle.wav';
-  var BGM_SRC = 'audio/music-walker-s.wav';   // 30.0s / PCM 16bit / 44.1kHz / 立体声 / 5.05MB
+  var BGM_SRC = 'audio/music-walker-s.wav';   // 第一段「旅途主题」30.0s / 5.05MB
+  var BGM2_SRC = 'audio/music-ancient-s.wav'; // 第二段「古堡主题」30.0s / 5.05MB（v2.18 / Q59–Q61）
   var VIDEO_SRC = 'assets/screen3/suitcase-move.mp4';
   var VIDEO5_SRC = 'assets/screen5/oldbuilding-move.mp4';   // 第五幕开场视频（与第三幕同规格）
 
@@ -1286,12 +1287,14 @@
   }
 
   /* ================= 背景音乐 BGM（需求 §3.5 / Q27–Q30） =================
-     全片只有 1 个实例，生命周期由两次点击夹住：
+     【本实例 = 第一段「旅途主题」】生命周期由两次点击夹住：
        · 起播 = 点击第一幕 START（之前全程静音）
        · 停止 = 点击第四幕 Continue（唯一停止点）
      幕间切换绝不触碰它 —— 不 pause、不回零、不改音量（Q29：跨幕完全连续）。
      加载独立于 preload() 队列，失败/超时绝不阻塞开场（Q30）。
-     起播点本身是真实用户手势，自动播放策略天然满足，无需任何兜底。 */
+     起播点本身是真实用户手势，自动播放策略天然满足，无需任何兜底。
+     ⚠️ v2.18：第二段「古堡主题」另用**独立实例 bgm2**（见下方 stopBGM() 之后）——
+        两段互不干扰，__nj.state().bgm 永远只指第一段，不要改它的含义。 */
   var bgm = new Audio(BGM_SRC);
   bgm.preload = 'auto';     // 独立拉取：5.05MB 未压缩 WAV 不进开场等待队列
   bgm.loop = true;          // Q28
@@ -1323,6 +1326,40 @@
   function stopBGM() {
     bgmWanted = false;
     try { bgm.pause(); bgm.currentTime = 0; } catch (e) { /* ignore */ }
+  }
+
+  /* ---- 第二段 BGM：第五幕「古堡主题」（需求 §3.5.4 / Q59–Q61 / 计划 §6.7.2）----
+     起播 = 第五幕 B1 户外定格图淡入的首帧；停止 = 第六幕 C5 点 Continue 的同一帧（全片终点）。
+     ⚠️ 刻意不复用 bgm（第一段）：既有测试里约 20 条 state().bgm.* 断言靠它零回归。
+     参数 Q61：volume 0.35 + loop = true + 硬起硬停（不写任何淡入淡出）。 */
+  var bgm2 = new Audio(BGM2_SRC);
+  bgm2.preload = 'auto';     // 独立拉取：5.05MB 未压缩 WAV 不进任何预加载队列（Q30 口径）
+  bgm2.loop = true;          // Q61
+  bgm2.volume = 0.35;        // Q61（与第一段一致）
+
+  var bgm2Ready = false;     // 是否可播（canplaythrough / loadeddata 已触发）
+  var bgm2Wanted = false;    // 第五幕 B1 已到，但音乐可能尚未就绪
+
+  function onBgm2Ready() {   // 与 onBgmReady 同款双保险：少数浏览器只给 loadeddata
+    if (bgm2Ready) return;
+    bgm2Ready = true;
+    if (bgm2Wanted) startBGM2();
+  }
+  bgm2.addEventListener('canplaythrough', onBgm2Ready, { once: true });
+  bgm2.addEventListener('loadeddata', onBgm2Ready, { once: true });
+  bgm2.addEventListener('error', function () { /* 静默吞掉：绝不阻塞任何画面 */ });
+  try { bgm2.load(); } catch (e) { /* ignore */ }
+
+  function startBGM2() {
+    bgm2Wanted = true;
+    if (!bgm2Ready) return;                     // 未就绪 -> 交给 onBgm2Ready 补播
+    var p = bgm2.play();
+    if (p && typeof p.catch === 'function') p.catch(function () {});
+  }
+
+  function stopBGM2() {
+    bgm2Wanted = false;
+    try { bgm2.pause(); bgm2.currentTime = 0; } catch (e) { /* ignore */ }
   }
 
   /* ================= 预加载 ================= */
@@ -1725,9 +1762,10 @@
         setTimeout(function () { btnContinue.classList.add('settled'); }, 520);
         return waitClick(btnContinue);          // Q20：点击 Continue 才转全黑，不自动延时
       })
-      // 点击 Continue 的那一刻立刻停止 BGM（全片唯一停止点，需求 §3.5.1）：
-      // 结尾是「音乐停 -> 画面黑」，随后的 700ms 渐入与静止黑屏全程无音乐。
-      // ⚠️ Q32（v2.12 确认）：停止点保持原样，此后不再起播 —— 第五幕及后续各幕全程静音。
+      // 点击 Continue 的那一刻立刻停止【第一段】BGM（Q32 停止点保持不变，需求 §3.5.1）：
+      // 结尾是「音乐停 -> 画面黑」，随后的 700ms 渐入与静止黑屏无第一段音乐。
+      // ⚠️ v2.18：这里**不要**写 stopBGM2() —— 第二段「古堡主题」要到第五幕 B1 才起播（Q59），
+      //    并在第六幕 C5 点 Continue 的同一帧停止（Q60）。旧口径「第五幕及后续全程静音」已作废。
       .then(function () {
         preloadAct5();                 // 第五幕素材与黑幕渐入并行预取（不阻塞）
         stopBGM();
@@ -1759,7 +1797,9 @@
   /* ================= 第五幕：古城堡（需求 §8） =================
      B1 视频 → B2/B3 户外两句对话 → B4 进室内 + 纸片亮相
      → B5/B6 室内两句对话 → B7 引导手 → B8 点纸片 → 黑幕转场（衔接第六幕）
-     ⚠️ BGM 全程无动作（Q32）：早在第四幕点 Continue 时就已停止。
+     ⚠️ BGM：第一段（Q32）早在第四幕点 Continue 时就已停止，本幕不碰它；
+        第二段「古堡主题」在 B1 户外定格图淡入的**同一帧**起播（Q59 / v2.18），
+        此后跨本幕全程不断 —— 含 B8 黑幕转场（Q60：那里**不是**停止点）。
      ⚠️ 推进点共 4 处（btn-go5a × 2、btn-go5b × 2），每段独立，靠 busy 锁防连点。 */
   function runAct5() {
     // 幕容器转为可见（此刻 #act5-outdoor / #bg-inside 各自仍是 opacity:0，画面仍全黑）
@@ -1774,6 +1814,7 @@
         blackout.classList.add('fast');
         return anim(400, function () {
           outdoor5.classList.add('in');
+          startBGM2();                       // Q59：画面出现即有音乐（同一帧，另起 .then() 就不是同帧）
           blackout.classList.remove('in');
           blackout.classList.add('guard');
         });
@@ -1857,7 +1898,8 @@
         return anim(300, function () { hand5.classList.remove('in'); });
       })
       .then(function () {
-        // BGM 无动作（Q32：早在第四幕末已停，第五幕全程静音）
+        // BGM：第一段无动作（Q32：早在第四幕末已停）；第二段「古堡主题」自 B1 起一直在播、
+        //      跨 B8 不中断（Q60 / R34 —— 这里的黑幕只是转场，不是停止点）→ 不写任何 bgm 代码
         blackout.classList.remove('fast');
         return anim(700, function () { blackout.classList.add('in'); });
       })
@@ -1882,10 +1924,12 @@
      ⚠️ C5 收尾整套复用第四幕 runAct4() 末段，但有**三处必须显式「删掉」**：
         · 不写 `#act3.ui-out` 那一步 —— Q55：本幕幕内**一律保留、不做淡出**，
           只被 70% 蒙黑整体压暗（与第四幕做法**正好相反**）
-        · 不写 stopBGM() —— BGM 早在第四幕末点击 Continue 时就停了，本幕**全程静音**（Q32）
+        · 不写 stopBGM() —— **第一段** BGM 早在第四幕末点击 Continue 时就停了（Q32）；
+          ⚠️ 但 v2.18 起第 4 拍**必须**写 stopBGM2()（**第二段**在 C5 点击的同一帧停止，Q60）
         · 不给 #act6 整幕设 pointer-events:none —— 本幕的 Continue 乃至 C3 拖拽都依赖
           真实点击，只能**逐个**给两个圆钮加 .dead（Q56）
-     ⚠️ 本幕不触碰任何 bgm 代码（需求 §3.5 / Q32）。 */
+     ⚠️ 本幕对**第一段** `bgm` 零动作（需求 §3.5 / Q32）；
+        **第二段** `bgm2` 仅 C5 第 4 拍一处 stopBGM2()（v2.18 · Q60）。 */
 
   function pieceEl(id) { return puzzleEls[id] || null; }
 
@@ -2221,6 +2265,8 @@
           btnContinue6.classList.remove('in');
           btnContinue6.classList.add('out');      // 退场压至 150ms
           blackout.classList.add('in');           // 400ms 渐入
+          stopBGM2();                             // Q60：第二段与黑幕同一帧停止（＝全片终点）
+                                                  //   第一段早在第四幕末已停，此处不动 bgm
         });
       })
       // 全黑滞留 = 全片终点（Q53）：不重播、不显示额外文字 / 按钮、不回到第一幕
@@ -2433,6 +2479,16 @@
           volume: bgm.volume,               // Q27：应为 0.35
           currentTime: bgm.currentTime,     // Q29：跨幕不重启，此值应单调不减
           src: bgm.src
+        },
+        // 第二段 BGM 状态（需求 §3.5.4 / Q59–Q61）—— 与 bgm 完全同构，只读
+        bgm2: {
+          ready: bgm2Ready,                 // 是否已完成加载
+          wanted: bgm2Wanted,               // 第五幕 B1 已到、应当正在响
+          paused: bgm2.paused,              // 是否暂停
+          loop: bgm2.loop,                  // Q61：应为 true
+          volume: bgm2.volume,              // Q61：应为 0.35
+          currentTime: bgm2.currentTime,    // 跨 B5/B8 不重启，此值应单调不减
+          src: bgm2.src
         },
         soundVolume: pool.length ? pool[0].volume : 0   // 点击音效音量（应为 0.85，不受 BGM 影响）
       };
