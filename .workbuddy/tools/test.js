@@ -2445,16 +2445,82 @@ const INK_TOP_FN = `(() => {
       return true;
     })()`);
 
+    /* 问题2（Q58）的动作探针：`all-picture` 出现时的「整体放大 → 缩回原尺寸」。
+       ⚠️ 按本项目的既定口径，量「**怎么**动的」必须采样**动画期的 computed transform** ——
+          只量 offsetLeft/offsetTop（布局坐标）在这件事上恒为常数，什么也测不出来。
+       ⚠️ 同时采样 matrix 的 4 个分量：a=scaleX、b=skewY、c=skewX、d=scaleY ——
+          以区分「等比整体缩放」（a===d、b===c===0）与「拉扁 / 旋转」。 */
+    await evaluate(`(() => {
+      window.__pop = { n: 0, max: 1, min: 9, last: 1, skewMax: 0, anisoMax: 0,
+                       moved: 0, tFirstUp: 0, tEnd: 0, done: false };
+      const el = document.getElementById('all-picture');
+      const t0 = performance.now();
+      window.__popTimer = setInterval(() => {
+        const m = getComputedStyle(el).transform;
+        let a = 1, b = 0, c = 0, d = 1;
+        if (m && m !== 'none' && m.indexOf('matrix') === 0) {
+          const p = m.slice(m.indexOf('(') + 1, m.indexOf(')')).split(',').map(Number);
+          a = p[0]; b = p[1]; c = p[2]; d = p[3];
+        }
+        const t = performance.now() - t0;
+        const P = window.__pop;
+        P.n++;
+        if (a > P.max) P.max = a;
+        if (d > P.max) P.max = d;
+        if (a < P.min) P.min = a;
+        const sk = Math.max(Math.abs(b), Math.abs(c));
+        if (sk > P.skewMax) P.skewMax = sk;
+        const an = Math.abs(a - d);
+        if (an > P.anisoMax) P.anisoMax = an;
+        P.last = a;
+        /* 「整体放大」= 只有 transform 在动：布局坐标（computed left/top）必须**全程不变**。
+           ⚠️ 这条只能在**动画期**采才有意义 —— 动画结束后再量布局坐标是恒真的（transform
+              本来就不影响布局），那等于什么都没测。 */
+        const cs = getComputedStyle(el);
+        if (cs.left !== '178px' || cs.top !== '126px') P.moved++;
+        if (!P.tFirstUp && a > 1.01) P.tFirstUp = Math.round(t);
+        if (!P.done && P.max > 1.01 && a < 1.005 && t > 400) { P.tEnd = Math.round(t); P.done = true; }
+        if (t > 2500) clearInterval(window.__popTimer);
+      }, 10);
+      return true;
+    })()`);
+
     // ---------- C4：all-picture 淡入 + 常驻发光 ----------
     await waitFor(`window.__nj.state().act6.allPictureIn === true`, 8000, 'all-picture 淡入');
     await waitFor(`window.__nj.state().act6.allPictureGlow === true`, 8000, '发光挂上');
     await sleep(300);
     assertEq('a6c all-picture 已淡入（盖住拼合结果）', await effOpacity('#all-picture'), 1, 0.02);
     assertEq('a6c all-picture 左边缘 = 178（与静态底同槽）', (await box('#all-picture')).left, 178, 0);
+    /* ⚠️ 不能写 === 'picGlow' —— 问题2（Q58）起 `.pop` 与 `.glow` **同帧**挂上，
+       `animationName` 会是 `'picPop, picGlow'`（CSS 的 animation 是整体替换、不叠加），
+       断言必须改成「**包含** picGlow」，否则这条会因为并存而假红。 */
     assertTrue('a6c 发光是 CSS 关键帧（素材里没有发光版整图，Q49）',
-      (await evaluate(`getComputedStyle(document.getElementById('all-picture')).animationName`)) === 'picGlow');
-    assertTrue('a6c 发光周期 1.6s、无限循环',
-      (await evaluate(`getComputedStyle(document.getElementById('all-picture')).animationIterationCount`)) === 'infinite');
+      (await evaluate(`getComputedStyle(document.getElementById('all-picture')).animationName`)).indexOf('picGlow') >= 0);
+    assertTrue('a6c 问题2 pop 已挂上（animationName 含 picPop）',
+      (await evaluate(`getComputedStyle(document.getElementById('all-picture')).animationName`)).indexOf('picPop') >= 0);
+    assertTrue('a6c 问题2 all-picture 已挂 .pop 类',
+      await hasClass('#all-picture', 'pop'));
+    /* ⚠️ `.pop` 与 `.glow` 并存后，animationName / Duration / IterationCount 都是**逗号列表**
+       （如 `'picPop, picGlow'` / `'1s, 1.6s'` / `'1, infinite'`），整串比较必假红。
+       必须按名字取索引再逐项校验。 */
+    assertTrue('a6c 发光周期 1.6s、无限循环（按名字取索引，不整串比较）',
+      (await evaluate(`(() => {
+        const cs = getComputedStyle(document.getElementById('all-picture'));
+        const names = cs.animationName.split(',').map(function (s) { return s.trim(); });
+        const durs = cs.animationDuration.split(',').map(function (s) { return s.trim(); });
+        const iters = cs.animationIterationCount.split(',').map(function (s) { return s.trim(); });
+        const i = names.indexOf('picGlow');
+        return i < 0 ? '' : durs[i] + '|' + iters[i];
+      })()`)) === '1.6s|infinite');
+    assertTrue('a6c 问题2 pop 动画为一次性 1s（按名字取索引）',
+      (await evaluate(`(() => {
+        const cs = getComputedStyle(document.getElementById('all-picture'));
+        const names = cs.animationName.split(',').map(function (s) { return s.trim(); });
+        const durs = cs.animationDuration.split(',').map(function (s) { return s.trim(); });
+        const iters = cs.animationIterationCount.split(',').map(function (s) { return s.trim(); });
+        const i = names.indexOf('picPop');
+        return i < 0 ? '' : durs[i] + '|' + iters[i];
+      })()`)) === '1s|1');
     assertTrue('a6c C4 期间两钮仍可点（需求 §9.6 第 4 条）',
       (await box('#btn-again')).pointerEvents === 'auto' &&
       (await box('#btn-picture')).pointerEvents === 'auto');
@@ -2463,7 +2529,49 @@ const INK_TOP_FN = `(() => {
         const el = document.querySelector('#piece-layer .piece[data-piece="picture-08-03"]');
         return !!el && Math.abs(parseFloat(el.style.left) - 334) < 0.6 && Math.abs(parseFloat(el.style.top) - 318) < 0.6;
       })()`));
-    await shot('a6c-1-glow');
+    // ---------- 问题2（Q58）：整体放大 → 缩回原尺寸 ----------
+    /* 探针在 count===9 时就装好了（all-picture 要再等 350ms 才出现），
+       这里只等它自己判定「已放大过、且已回到 1」。 */
+    await waitFor(`window.__pop && window.__pop.done === true`, 8000, 'pop 播完（放大后回到原尺寸）');
+    const pop = await evaluate(`window.__pop`);
+    assertTrue('a6c 问题2 探针确实采到了足够多的点（n=' + pop.n + '）', pop.n >= 60, JSON.stringify({ n: pop.n }));
+    assertTrue('a6c 问题2 确实**放大过**（峰值 scale = ' + pop.max.toFixed(4) + ' > 1.05）',
+      pop.max > 1.05, JSON.stringify(pop));
+    assertTrue('a6c 问题2 峰值 = 设计的 1.08（实测 ' + pop.max.toFixed(4) + '）',
+      Math.abs(pop.max - 1.08) <= 0.015, JSON.stringify(pop));
+    assertTrue('a6c 问题2 最终**缩回原来尺寸**（末次采样 scale = ' + pop.last.toFixed(4) + '）',
+      Math.abs(pop.last - 1) <= 0.005, JSON.stringify(pop));
+    assertTrue('a6c 问题2 放大**发生在淡入之后**（首次 >1.01 在 ' + pop.tFirstUp + 'ms，早于 600ms 就是「一出现就弹」）',
+      pop.tFirstUp >= 600 && pop.tFirstUp <= 1100, JSON.stringify(pop));
+    assertTrue('a6c 问题2 是**等比整体**缩放、无旋转 / 斜切（skewMax = ' + pop.skewMax.toFixed(5) + '）',
+      pop.skewMax < 0.002, JSON.stringify(pop));
+    assertTrue('a6c 问题2 是**等比整体**缩放、无拉扁（|scaleX−scaleY| 最大 = ' + pop.anisoMax.toFixed(5) + '）',
+      pop.anisoMax < 0.002, JSON.stringify(pop));
+    assertTrue('a6c 问题2 围绕**画心**缩放（transform-origin = 320px 258.5px）',
+      (await evaluate(`getComputedStyle(document.getElementById('all-picture')).transformOrigin`)) === '320px 258.5px');
+    assertEq('a6c 问题2 放大**全程不挪位**（动画期采样：布局坐标越界次数 = 0）', pop.moved, 0, 0);
+
+    /* ⚠️ 「无残留形变」必须在 `.pop` 的 1s 迭代**真正跑完之后**量 ——
+       `__pop.done` 的判据是「已放大过且回到 <1.005」，它在动画收尾前就会置位
+       （首版就是在这里假红的：置位当刻 transform 仍是 matrix(1.0019, …)）。 */
+    await sleep(350);
+    const popEnd = await evaluate(`(() => { const el = document.getElementById('all-picture');
+      return { last: window.__pop.last, transform: getComputedStyle(el).transform }; })()`);
+    assertTrue('a6c 问题2 动画结束后 transform 已**回落**（无残留形变，实测 ' + popEnd.transform + '）',
+      !popEnd.transform || popEnd.transform === 'none' || popEnd.transform === 'matrix(1, 0, 0, 1, 0, 0)');
+    assertTrue('a6c 问题2 动画结束后仍为**原尺寸**（scale = ' + popEnd.last.toFixed(5) + '）',
+      Math.abs(popEnd.last - 1) <= 0.0005);
+
+    /* 🔍 定格截图（**只为人工目检**「放大态」长什么样）：把动画钉在峰值 scale(1.08)。
+       ⚠️ 放在**全部断言之后**、用完立刻还原 —— 它绝不参与任何断言，
+          否则「截图卡主线程」会与 pop 的采样互相干扰（这正是前面把 shot 挪到 pop 之后的原因）。 */
+    await evaluate(`(() => { const el = document.getElementById('all-picture');
+      el.style.animation = 'none'; el.style.transform = 'scale(1.08)'; return true; })()`);
+    await shot('a6c-2-pop-peak');
+    await evaluate(`(() => { const el = document.getElementById('all-picture');
+      el.style.animation = ''; el.style.transform = ''; return true; })()`);
+
+    await shot('a6c-1-glow');   // ⚠️ 截图会卡主线程（动画期采不到点），故放在 pop 播完之后
 
     // ---------- 等满 2s → 蒙黑出现（Q54：2s = 进 C5 的等待，不是「亮 2s 就熄灭」） ----------
     await startDropProbe('goal02', 9000);

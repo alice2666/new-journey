@@ -589,6 +589,27 @@
     50%      { filter: drop-shadow(0 0 18px rgba(255, 240, 180, .95)) brightness(1.12); }
   }
   #all-picture.glow { animation: picGlow 1.6s ease-in-out infinite; }
+  /* 🆕 问题2（需求 v2.22 · Q58）：all-picture 出现时**整体放大再缩回原尺寸**（一次性的「弹一下」）。
+     ⚠️ 两个坑：
+        ① `.pop` 与 `.glow` 会**同帧**挂上（runAct6Finish 里 `.in` / `.pop` 同一拍加类，
+           紧接着的 `anim(0, ...)` 再加 `.glow`）。而 CSS 的 `animation` 是**整体替换、不叠加** ——
+           若只写两条同特异性的规则，按「后定义者胜」会**静默吃掉一个动画**（要么不弹、要么不发光）。
+           所以必须显式给出 `.pop.glow` 的组合规则（特异性更高）。
+        ② 「等淡入走完再弹」用 **keyframes 内部的前 40% 原地不动** 表达，**不用 `animation-delay`
+           + `fill-mode`** —— 后者会让 `transform` 被动画的填充值长期接管，留下隐性状态。
+     ⚠️ `.pop` 类**挂上后不摘除**（见 runAct6Finish 的注释）：动画 `1` 次迭代、无 fill-mode，
+        播完 transform 自然回落到 CSS 声明态；若用 `animationend` 摘类，会让**同帧并存的
+        `picGlow` 被重启**（相位从 59% 跳回 0%），那是一次肉眼可见的亮度闪。
+     ⚠️ `transform-origin` 保持默认的 `50% 50%`（= 320px 258.5px）→ 围绕**画心**缩放，
+        布局坐标（`left/top`）全程不变，因此「整体放大」不会把画挪位。 */
+  @keyframes picPop {
+    0%, 40% { transform: scale(1); }        /* 0–400ms 与 `.in` 的 400ms 淡入重叠：先原地不动 */
+    70%     { transform: scale(1.08); }     /* 400–700ms：放大 */
+    100%    { transform: scale(1); }        /* 700–1000ms：缩回原尺寸 */
+  }
+  #all-picture.pop { animation: picPop 1s ease-in-out 1; }
+  #all-picture.pop.glow { animation: picPop 1s ease-in-out 1,
+                                    picGlow 1.6s ease-in-out infinite; }
 
   /* ---------- C5：蒙黑 + 第二张 Goal 卡 + Continue（整套复用第四幕） ----------
      ⚠️ 三件必须在 #act6 内**新建**，绝不可复用 #act4 的 #shadow / #goal01 / #continue ——
@@ -2150,7 +2171,15 @@
      终点 = 点击 Continue → 黑幕渐入 → 全黑滞留（Q53）。 */
   function runAct6Finish() {
     return anim(350, function () {})        // 第 9 张落位后停顿（需求 §9.6 的 300–400，取中值）
-      .then(function () { return anim(400, function () { allPicture.classList.add('in'); }); })
+      .then(function () {
+        return anim(400, function () {
+          allPicture.classList.add('in');
+          /* 🆕 问题2（Q58）：整幅画出现时「整体放大再缩回原尺寸」。
+             ⚠️ 与 `.in` **同一帧**挂上（动画自己在 keyframes 里等足 400ms 再起跳），
+                且**只加不摘** —— 摘除会重启同帧并存的 `picGlow`（相位归零 → 可见闪）。 */
+          allPicture.classList.add('pop');
+        });
+      })
       // Q49 / Q54：发光**常驻不熄灭** —— 挂上就不再摘，进入 C5 也保持，
       // 只是随后被 #shadow6（70% 蒙黑）整体压暗
       .then(function () { return anim(0, function () { allPicture.classList.add('glow'); }); })
