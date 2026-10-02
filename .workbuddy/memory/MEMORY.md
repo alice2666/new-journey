@@ -2,7 +2,7 @@
 
 - 单文件纯静态叙事小游戏，交付 `index.html`（原生 HTML/CSS/JS，零依赖）。画布 **1200×896**，`#stage` 等比缩放。
 - 素材 `assets/screen1..7`，路径**正斜杠**。**1~6 幕全部已交付**（第六幕 v2.15 实现 + v2.16/17 微调）。
-- 音频：`toggle.wav`（音效 0.85）、`music-walker-s.wav`（第一段 BGM）、`music-ancient-s.wav`（第二段·第五幕·**待开发**）。
+- 音频：`toggle.wav`（音效 0.85）、`music-walker-s.wav`（第一段 BGM：点 START→第四幕 `Continue` 停）、`music-ancient-s.wav`（第二段·第五幕 B1 户外图首帧→全片终点·**待开发**）。
 - **去掉播放中视频又留背景 → 导出末帧成真实素材**（headless Edge `seek`→`drawImage`）。
 
 ## 文档分工
