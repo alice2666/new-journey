@@ -12,6 +12,7 @@
  *   node .workbuddy/tools/test.js a4       第四幕：蒙黑 -> Goal（从上到下快速落下）-> Continue -> 全黑
  *   node .workbuddy/tools/test.js bgm      背景音乐：点击 START 起播 -> 跨幕连续 -> 点击 Continue 停止
  *   node .workbuddy/tools/test.js bgm2     BGM 缺失时不得阻塞开场（屏蔽音乐资源后重跑）
+ *   node .workbuddy/tools/test.js bgm3     第二段 BGM：B1 起播 -> 跨 B5/B8 不中断 -> C5 同帧停止
  *   node .workbuddy/tools/test.js full2    第一 ~ 第四幕全流程（真实播放视频）
  *   node .workbuddy/tools/test.js a5       第五幕：户外定格图 -> 户外对话 -> 切室内 -> 纸片
  *   node .workbuddy/tools/test.js a5b      第五幕：室内对话 -> 引导手 -> 点纸片 -> 黑幕
@@ -157,7 +158,7 @@ const INK_TOP_FN = `(() => {
 /* ================= 主流程 ================= */
 (async () => {
   const which = process.argv.slice(2).filter((a) => !a.startsWith('-'));
-  const cases = which.length ? which : ['gate', 'p1', 'p2', 'flow', 'a3', 'a3b', 'a3c', 'a4', 'a5', 'a5b', 'a6', 'a6b', 'a6c', 'bgm', 'bgm2', 'full2', 'full3', 'full4'];
+  const cases = which.length ? which : ['gate', 'p1', 'p2', 'flow', 'a3', 'a3b', 'a3c', 'a4', 'a5', 'a5b', 'a6', 'a6b', 'a6c', 'bgm', 'bgm2', 'bgm3', 'full2', 'full3', 'full4'];
 
   const child = spawn(EDGE, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -1299,6 +1300,135 @@ const INK_TOP_FN = `(() => {
     }
   }
 
+  /* ================= 用例 bgm3：第二段 BGM「古堡主题」（需求 §3.5.4 / Q59–Q61） =================
+     第二段的生命周期由「第五幕 B1 户外定格图淡入的首帧」与「第六幕 C5 点 Continue 的同一帧」夹住，
+     并且**跨第五幕 B4/B5 与 B8 转场不中断** —— B8 的 700ms 黑幕只是转场，不是停止点（R34）。
+
+     ⚠️ 本用例验的是**起止逻辑与跨幕连续性**，不是「自动播放策略能否放行」：
+     启动参数带了 --autoplay-policy=no-user-gesture-required，在这里验策略必得假结论。
+     真实默认策略下的可行性由 .workbuddy/tools/probe-bgm2.js（不传该 flag）单独实测。
+
+     ⚠️ 用例名叫 bgm3 而不是 bgm2 —— bgm2 已被上面的「BGM 缺失不得阻塞开场」占用。 */
+  async function caseBgm3() {
+    const st2 = async () => (await njState()).bgm2;
+
+    /* ---- 1. 参数与实例：与第一段同构，但必须是两个独立 Audio ---- */
+    const p0 = await st2();
+    assertEq('bgm3 第二段音量 = 0.35（Q61）', p0.volume, 0.35, 0.001);
+    assertTrue('bgm3 第二段循环 = true（Q61）', p0.loop === true, 'loop = ' + p0.loop);
+    assertTrue('bgm3 第二段素材指向 music-ancient-s.wav',
+      String(p0.src).indexOf('music-ancient-s.wav') > -1, 'src = ' + p0.src);
+    assertTrue('bgm3 第二段与第一段是两个独立实例（src 不同、各自一份状态）',
+      String(p0.src) !== String((await njState()).bgm.src));
+
+    /* ---- 2. 起播点之前（第一 ~ 第四幕）必须全程静音 ---- */
+    await toAct3Panel();
+    await evaluate(`window.__nj.setRotation(0)`);
+    await place('bag', 250, 400);
+    await place('camera', 400, 550);
+    await place('drink', 300, 680);
+    await waitFor(`window.__nj.state().okReady === true`, 4000, 'OK 可用');
+    await sleep(150);
+    await click('#btn-ok');
+    await waitFor(`document.getElementById('continue').classList.contains('in')`, 10000, 'Continue 滑入');
+    await sleep(600);
+    const pre4 = await st2();
+    assertTrue('bgm3 第四幕点 Continue 之前第二段未起播（paused = true）', pre4.paused === true);
+    assertTrue('bgm3 第四幕点 Continue 之前第二段未被请求（wanted = false）', pre4.wanted === false);
+
+    /* ---- 3. 第四幕 Continue 只停第一段，绝不碰第二段 ---- */
+    await click('#continue');
+    await waitFor(`document.getElementById('act5').classList.contains('active')`, 15000, '第五幕激活');
+    const atAct5 = await evaluate(`(() => { const s = window.__nj.state();
+      return { wanted2: s.bgm2.wanted, paused2: s.bgm2.paused, paused1: s.bgm.paused,
+               outdoorIn: s.act5.outdoorIn,
+               blackoutIn: document.getElementById('blackout').classList.contains('in') }; })()`);
+    assertTrue('bgm3 第四幕 Continue 停的仍是第一段（bgm.paused = true）', atAct5.paused1 === true);
+    assertTrue('bgm3 「进入第五幕」不等于起播：B1 尚未淡入时第二段仍未起播（Q59 的起播点是 B1 而非进幕）',
+      atAct5.wanted2 === false && atAct5.paused2 === true, JSON.stringify(atAct5));
+
+    /* ---- 4. ★ B1 户外定格图淡入 = 第二段起播（Q59） ---- */
+    await waitFor(`window.__nj.state().act5.outdoorIn === true`, 15000, '户外定格图淡入');
+    await waitFor(`window.__nj.state().bgm2.wanted === true`, 4000, '第二段起播请求');
+    await sleep(250);
+    const b1 = await st2();
+    assertTrue('bgm3 B1 户外定格图淡入后第二段确实在播（paused = false）', b1.paused === false,
+      'paused = ' + b1.paused + ' / ready = ' + b1.ready);
+    assertTrue('bgm3 第二段起播时第一段已停（两段没有互相复用）',
+      (await njState()).bgm.paused === true);
+    assertTrue('bgm3 第二段从自己的 0 开始（没有接着第一段的进度）', b1.currentTime < 3,
+      'currentTime = ' + b1.currentTime);
+    // 第 21 个截图状态（§11.2）：给「起播点与画面同帧」留一张目检素材
+    // ⚠️ 音乐本身仍然只能靠上面的断言 —— 截图证明不了声音
+    await shot('bgm3-1-b1');
+
+    /* ---- 5. 跨 B4/B5（户外 -> 切室内）不中断（Q60） ---- */
+    await waitFor(`document.getElementById('btn-go5a').classList.contains('in')`, 25000, '第 ④ 句打完');
+    await sleep(350); await click('#btn-go5a');
+    await waitFor(`document.getElementById('btn-go5a').classList.contains('in')`, 25000, '第 ⑤ 句打完');
+    await sleep(350); await click('#btn-go5a');
+    await waitFor(`document.getElementById('chat5b').classList.contains('in')`, 10000, 'chat5b 滑入（已切室内）');
+    const b5 = await st2();
+    assertTrue('bgm3 跨 B4/B5 切室内后第二段未中断（paused = false）', b5.paused === false);
+    assertTrue('bgm3 跨 B4/B5 currentTime 单调向前（未重启回零）',
+      b5.currentTime > b1.currentTime, b1.currentTime.toFixed(2) + ' -> ' + b5.currentTime.toFixed(2));
+
+    /* ---- 6. 跨 B7（引导手）+ B8（黑幕转场）不中断（R34） ---- */
+    await waitFor(`document.getElementById('btn-go5b').classList.contains('in')`, 25000, '第 ⑥ 句打完');
+    await sleep(350); await click('#btn-go5b');
+    await waitFor(`document.getElementById('btn-go5b').classList.contains('in')`, 25000, '第 ⑦ 句打完');
+    await sleep(350); await click('#btn-go5b');
+    await waitFor(`window.__nj.state().act5.papersClickable === true`, 10000, '纸片可点');
+    await sleep(400);
+    await click('#btn-papers');
+    await waitFor(`document.getElementById('act6').classList.contains('active')`, 20000, '第六幕激活');
+    const b8 = await st2();
+    assertTrue('bgm3 跨 B8 黑幕转场（700ms）时第二段仍在播 —— 转场不是停止点', b8.paused === false);
+    assertTrue('bgm3 跨 B8 currentTime 继续推进（未重启回零）',
+      b8.currentTime > b5.currentTime, b5.currentTime.toFixed(2) + ' -> ' + b8.currentTime.toFixed(2));
+
+    /* ---- 7. 第六幕整幕不断（C1 / C2 / C3 拼图 9 张 / C4） ---- */
+    await waitFor(`window.__nj.state().act6.pieceManyIn === true`, 10000, '静态底淡入完成');
+    await waitFor(`window.__nj.state().act6.framePictureIn === true`, 10000, '右侧底板滑入');
+    await waitFor(`window.__nj.state().act6.btnPictureIn === true`, 15000, 'btn-picture 滑入');
+    await waitFor(`document.querySelectorAll('#piece-layer .piece').length === 3`, 25000, '第 1 波投放');
+    await waitFor(`window.__nj.state().busy === false && window.__nj.state().animLock === false`, 10000, 'C3 开始');
+    await sleep(250);
+    const solved = await solveAllPieces();
+    assertEq('bgm3 拼图 9/9 完成（为抵达 C5 终点）', solved, 9, 0);
+    await waitFor(`window.__nj.state().act6.allPictureIn === true`, 15000, 'all-picture 淡入');
+    await waitFor(`document.getElementById('continue6').classList.contains('in')`, 15000, 'C5 Continue 滑入');
+    await sleep(700);
+    const c5 = await st2();
+    assertTrue('bgm3 第六幕 C5 点 Continue 之前第二段仍在播（跨整幕不中断）', c5.paused === false,
+      'paused = ' + c5.paused + ' / currentTime = ' + c5.currentTime.toFixed(2));
+
+    /* ---- 8. ★ C5 点 Continue = 第二段停止，且与黑幕渐入**同一帧**（Q60） ----
+       判据：点完的那一次采样里，黑幕已挂 .in（说明第 4 拍回调已执行）但**尚未到顶**，
+       而 bgm2 已经 paused —— 若写成「黑幕跑完再停」，这里会采到 paused = false 而假红。 */
+    await click('#continue6');
+    const same = await evaluate(`(() => {
+      const b = document.getElementById('blackout');
+      const s = window.__nj.state();
+      return { blackoutIn: b.classList.contains('in'), blackoutOp: +getComputedStyle(b).opacity,
+               wanted2: s.bgm2.wanted, paused2: s.bgm2.paused,
+               current2: s.bgm2.currentTime, paused1: s.bgm.paused }; })()`);
+    assertTrue('bgm3 点 Continue 后第二段已停（同帧 stopBGM2，wanted = false）',
+      same.paused2 === true && same.wanted2 === false, JSON.stringify(same));
+    assertEq('bgm3 停止后第二段 currentTime 归零（下次起播从头）', same.current2, 0, 0.01);
+    assertTrue('bgm3 停止与黑幕渐入同帧：黑幕已挂 .in 但尚未到顶（不是「黑幕跑完才停」）',
+      same.blackoutIn === true && same.blackoutOp < 1, JSON.stringify(same));
+    assertTrue('bgm3 全片终点时第一段同样保持停止（两段都静音）', same.paused1 === true);
+
+    /* ---- 9. 终点滞留期不得复播 ---- */
+    await waitFor(`window.__nj.state().act6.done === true`, 5000, '全片终点标记');
+    await waitFor(`+getComputedStyle(document.getElementById('blackout')).opacity === 1`, 5000, '黑幕到顶');
+    await sleep(500);
+    const fin = await njState();
+    assertTrue('bgm3 全片终点后第二段保持停止（未复播）', fin.bgm2.paused === true);
+    assertTrue('bgm3 全片终点后两段均静音（bgm + bgm2）', fin.bgm.paused === true && fin.bgm2.paused === true);
+  }
+
   async function caseA4() {
     await toAct3Panel();
     await evaluate(`window.__nj.setRotation(0)`);
@@ -1718,8 +1848,9 @@ const INK_TOP_FN = `(() => {
     await shot('a5b-3-hand');
 
     // --- B8 点击纸片 → 引导手隐藏、纸片保留 → 黑幕渐入 → 转场 ---
-    // 顺手确认「第五幕全程静音」（R23：终点由第四幕末后移，必须断言没有意外复播）
-    assertTrue('a5b 第五幕全程 BGM 保持停止（Q32：停止点未变，此后不再起播）',
+    // 顺手确认「第五幕【第一段】全程静音」（R23：终点由第四幕末后移，必须断言没有意外复播）
+    // ⚠️ v2.18：这条只断**第一段** —— 第二段「古堡主题」此刻正从 B1 起在播（由 bgm3 覆盖）
+    assertTrue('a5b 第五幕【第一段】BGM 保持停止（Q32：停止点未变；第二段自 B1 起在播）',
       (await njState()).bgm.paused === true);
     await click('#btn-papers');
     await waitFor(`!document.getElementById('hand5').classList.contains('in')`, 4000, '引导手隐藏');
@@ -1731,7 +1862,7 @@ const INK_TOP_FN = `(() => {
     await waitFor(`document.getElementById('blackout').classList.contains('in')`, 6000, '黑幕渐入');
     await sleep(900);
     assertEq('a5b 第五幕末画面全黑（转场，非终点）', await effOpacity('#blackout'), 1, 0.01);
-    assertTrue('a5b 第五幕收尾 BGM 仍停止（R23 副作用复查）',
+    assertTrue('a5b 第五幕收尾【第一段】BGM 仍停止（R23 副作用复查）',
       (await njState()).bgm.paused === true);
     assertTrue('a5b 第五幕无控制台报错', errors.length === 0, errors.join(' | '));
     await shot('a5b-4-black');
@@ -1789,7 +1920,7 @@ const INK_TOP_FN = `(() => {
     await waitFor(`document.getElementById('blackout').classList.contains('in')`, 8000, '第五幕末全黑');
     await sleep(900);
     assertEq('full3 终态（第五幕末）纯黑', await effOpacity('#blackout'), 1, 0.01);
-    assertTrue('full3 第五幕全程 BGM 保持停止', (await njState()).bgm.paused === true);
+    assertTrue('full3 第五幕【第一段】BGM 保持停止（第二段自 B1 起在播）', (await njState()).bgm.paused === true);
     await shot('full3-1-black');
     assertTrue('full3 全流程无控制台报错', errors.length === 0, errors.join(' | '));
   }
@@ -2182,7 +2313,7 @@ const INK_TOP_FN = `(() => {
     assertEq('a6 拖拽层此刻为空', await pieceCount('piece-drag'), 0, 0);
     assertTrue('a6 #act6 未挂 .ui-out（本幕不设 UI 淡出，Q55）',
       !(await hasClass('#act6', 'ui-out')));
-    assertTrue('a6 第六幕全程 BGM 保持停止（Q32）', (await njState()).bgm.paused === true);
+    assertTrue('a6 第六幕【第一段】BGM 保持停止（Q32；第二段到 C5 才停）', (await njState()).bgm.paused === true);
   }
 
   /* ================= 用例 a6b：第六幕 C3 拼图玩法（全片首次拖拽） =================
@@ -2683,7 +2814,7 @@ const INK_TOP_FN = `(() => {
       (await njState()).act6.allPictureGlow === true &&
       !(await hasClass('#btn-again', 'out')) &&
       !(await hasClass('#act6', 'ui-out')));
-    assertTrue('a6c 第六幕全程 BGM 保持停止（Q32：本幕无任何 bgm 动作）',
+    assertTrue('a6c 第六幕【第一段】BGM 保持停止（Q32；第二段在 C5 同帧停止）',
       (await njState()).bgm.paused === true);
     await shot('a6c-4-final-black');
   }
@@ -2711,8 +2842,9 @@ const INK_TOP_FN = `(() => {
     await waitFor(`document.getElementById('continue').classList.contains('in')`, 10000, 'Continue 滑入');
     await sleep(600);
     await click('#continue');
-    // 终点第四次后移：BGM 仍在第四幕末点击处停止，此后各幕全程静音
-    assertTrue('full4 点 Continue 后 BGM 即刻停止（停止点未变，Q32）',
+    // 终点第四次后移：**第一段** BGM 仍在第四幕末点击处停止（Q32），此后第一段全程静音；
+    // 第二段「古堡主题」自第五幕 B1 起播、到第六幕 C5 点击处才停（Q59/Q60，由 bgm3 覆盖）
+    assertTrue('full4 点 Continue 后【第一段】BGM 即刻停止（停止点未变，Q32）',
       await waitFor(`window.__nj.state().bgm.paused === true`, 4000, 'BGM 停止'));
 
     await waitFor(`window.__nj.state().act5.outdoorIn === true`, 20000, '户外定格图淡入');
@@ -2737,7 +2869,7 @@ const INK_TOP_FN = `(() => {
     await waitFor(`window.__nj.state().act6.pieceManyIn === true`, 10000, '静态底淡入');
     await waitFor(`window.__nj.state().act6.btnPictureIn === true`, 15000, 'C2 完成');
     await waitFor(`window.__nj.state().busy === false`, 15000, 'C2 锁释放');
-    assertTrue('full4 第六幕全程 BGM 保持停止',
+    assertTrue('full4 第六幕【第一段】BGM 保持停止',
       (await njState()).bgm.paused === true);
     assertTrue('full4 第五幕视频全程未播放（静帧取代）',
       await evaluate(`document.getElementById('act5-video').currentTime === 0`));
@@ -2804,14 +2936,14 @@ const INK_TOP_FN = `(() => {
   const CASES = {
     gate: caseGate,
     p1: caseP1, p2: caseP2, flow: caseFlow,
-    a3: caseA3, a3b: caseA3b, a3c: caseA3c, a4: caseA4, bgm: caseBgm, bgm2: caseBgm2, full2: caseFull2,
+    a3: caseA3, a3b: caseA3b, a3c: caseA3c, a4: caseA4, bgm: caseBgm, bgm2: caseBgm2, bgm3: caseBgm3, full2: caseFull2,
     a5: caseA5, a5b: caseA5b, full3: caseFull3,
     a6: caseA6, a6b: caseA6b, a6c: caseA6c, full4: caseFull4,
   };
 
   for (const name of cases) {
     console.log('\n=== 用例 ' + name + ' ===');
-    if (!CASES[name]) { fail('未知用例 ' + name, '可选: gate / p1 / p2 / flow / a3 / a3b / a3c / a4 / a5 / a5b / a6 / a6b / a6c / bgm / bgm2 / full2 / full3 / full4'); continue; }
+    if (!CASES[name]) { fail('未知用例 ' + name, '可选: gate / p1 / p2 / flow / a3 / a3b / a3c / a4 / a5 / a5b / a6 / a6b / a6c / bgm / bgm2 / bgm3 / full2 / full3 / full4'); continue; }
     try {
       await reload();
       await CASES[name]();

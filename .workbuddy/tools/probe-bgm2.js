@@ -153,10 +153,16 @@ class CDP {
   results.C = playC;
   await evaluate(`try { window.__pc.pause(); } catch (e) {} true`);
 
-  /* ---------- D. 两条 BGM 同时存在（新实例不影响旧实例） ---------- */
+  /* ---------- D. 页面**真实**的两段 BGM 实例（不是探针自建的临时对象）----------
+     此刻只点过 START、还没走到第五幕 → bgm2 必须**仍未起播**（Q59 的起播点是 B1，不是进片）。 */
   results.D = await evaluate(`(() => {
     const st = window.__nj.state();
-    return { bgmSrc: String(st.bgm.src).split('/').pop(), bgmPaused: st.bgm.paused, bgmWanted: st.bgm.wanted };
+    return {
+      bgmSrc: String(st.bgm.src).split('/').pop(), bgmPaused: st.bgm.paused, bgmWanted: st.bgm.wanted,
+      bgm2Src: String(st.bgm2.src).split('/').pop(), bgm2Paused: st.bgm2.paused,
+      bgm2Wanted: st.bgm2.wanted, bgm2Volume: st.bgm2.volume, bgm2Loop: st.bgm2.loop,
+      bgm2Ready: st.bgm2.ready
+    };
   })()`);
 
   console.log('\n===== 可行性探针结果 =====');
@@ -166,17 +172,22 @@ class CDP {
   console.log('B) 点 START 后 activation:', JSON.stringify(results.afterStart));
   console.log('B) 手势后 play()      :', JSON.stringify(results.B));
   console.log('C) 手势后 1.5s play()  :', JSON.stringify(results.C));
-  console.log('D) 旧实例不受影响      :', JSON.stringify(results.D));
+  console.log('D) 页面两段 BGM 实例   :', JSON.stringify(results.D));
 
   const decodeOk = results.A.decode.duration > 29 && results.A.decode.duration < 31 && results.A.decode.err === null;
   const bOk = results.B.ok === true;
   const cOk = results.C.ok === true;
+  // D 判据：第二段实例已在页面上就位（素材 / 参数对），且点 START 后仍未起播
+  const dOk = results.D.bgm2Src === 'music-ancient-s.wav' &&
+    results.D.bgm2Wanted === false && results.D.bgm2Paused === true &&
+    Math.abs(results.D.bgm2Volume - 0.35) < 0.001 && results.D.bgm2Loop === true;
   console.log('\n结论: 解码=' + (decodeOk ? 'OK' : 'FAIL') +
     '  手势后起播=' + (bOk ? 'OK' : 'FAIL') +
     '  手势后延迟起播=' + (cOk ? 'OK' : 'FAIL') +
+    '  第二段实例就位且未抢跑=' + (dOk ? 'OK' : 'FAIL') +
     '  无手势起播=' + (results.A.play.ok ? '被允许（本机策略宽松）' : '被拒（' + results.A.play.name + '）'));
 
   ws.close();
   child.kill();
-  process.exit(decodeOk && bOk && cOk ? 0 : 1);
+  process.exit(decodeOk && bOk && cOk && dOk ? 0 : 1);
 })();
