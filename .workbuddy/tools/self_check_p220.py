@@ -30,9 +30,32 @@ for n, l in lv2:
 
 print('===== 2b) 本轮应存在的关键子节 =====')
 need = ['### 5.6 ', '### 5.7 ', '### 6.27 ', '### 6.28 ', '### 8.6 ', '### 9.5 ',
-        '### 10.9 ', '### 10.10 ', '### 12.1.4 ', '### 13.20 ', '### 12.1.2 ', '### 12.1.3 ']
+        '### 10.9 ', '### 10.10 ', '### 12.1.4 ', '### 13.20 ', '### 13.21 ',
+        '### 12.1.2 ', '### 12.1.3 ']
 for k in need:
     print(' ', 'OK ' if k in txt else 'MISS', k)
+
+print('===== 2c) 版本号必须落在「已知集合」内 =====')
+# v2.21 教训：8 处写成不存在的 v2.28（两文档都不存在该号）→ 关键词 grep 抓不到，
+# 必须把每处 v2.x 与「需求文档 ∪ 计划文档的已有版本集合」比对。
+_req_raw = open(REQ, 'rb').read().decode('utf-8')
+_known = set(re.findall(r'v(\d+\.\d+)', _req_raw))
+_known |= set(re.findall(r'v(\d+\.\d+)', txt))
+# 文档自身的版本号（文档版本：**vX.Y**）也可能高于正文里的历史引用，属于已知
+for _m in re.finditer(r'文档版本：\*\*v(\d+\.\d+)\*\*', txt):
+    _known.add(_m.group(1))
+for _m in re.finditer(r'文档版本：\*\*v(\d+\.\d+)\*\*', _req_raw):
+    _known.add(_m.group(1))
+_unknown = []
+for _i, _l in enumerate(lines):
+    for _m in re.finditer(r'v(\d+\.\d+)', _l):
+        if _m.group(1) not in _known:
+            _unknown.append((_i + 1, _m.group(0)))
+if _unknown:
+    for _n, _v in _unknown[:40]:
+        print('  ⚠️ 行', _n, '::', _v, '（不在已知版本集合内）')
+else:
+    print('  （全部可解析）')
 
 print('===== 3) 表格列数一致性 =====')
 
