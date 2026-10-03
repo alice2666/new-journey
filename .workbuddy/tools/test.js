@@ -12,15 +12,16 @@
  *   node .workbuddy/tools/test.js a4       第四幕：蒙黑 -> Goal（从上到下快速落下）-> Continue -> 全黑
  *   node .workbuddy/tools/test.js bgm      背景音乐：点击 START 起播 -> 跨幕连续 -> 点击 Continue 停止
  *   node .workbuddy/tools/test.js bgm2     BGM 缺失时不得阻塞开场（屏蔽音乐资源后重跑）
- *   node .workbuddy/tools/test.js bgm3     第二段 BGM：B1 起播 -> 跨 B5/B8 不中断 -> C5 同帧停止
+ *   node .workbuddy/tools/test.js bgm3     第二段 BGM：B1 起播 -> 跨 B5/B8/六七幕不中断 -> 第八幕 THE END 停
  *   node .workbuddy/tools/test.js full2    第一 ~ 第四幕全流程（真实播放视频）
  *   node .workbuddy/tools/test.js a5       第五幕：户外定格图 -> 户外对话 -> 切室内 -> 纸片
  *   node .workbuddy/tools/test.js a5b      第五幕：室内对话 -> 引导手 -> 点纸片 -> 黑幕
  *   node .workbuddy/tools/test.js full3    第一 ~ 第五幕全流程
  *   node .workbuddy/tools/test.js a6       第六幕：C1 入场 / C2 右侧 UI 的结构与几何
  *   node .workbuddy/tools/test.js a6b      第六幕：C3 拼图玩法（判定矩阵 + 拖拽 + 缩放补偿）
- *   node .workbuddy/tools/test.js a6c      第六幕：C4 发光 / C5 蒙黑 + Goal 2 + Continue（终点）
- *   node .workbuddy/tools/test.js full4    第一 ~ 第六幕全流程（全片终）
+ *   node .workbuddy/tools/test.js a6c      第六幕：C4 发光 / C5 蒙黑 + Goal 2 + Continue -> 转场进第七幕
+ *   node .workbuddy/tools/test.js a7       第七幕：抉择 + 第八幕：终幕（抉择 -> 黑幕 -> THE END ＝全片终点）
+ *   node .workbuddy/tools/test.js full4    第一 ~ 第八幕全流程（全片终）
  *
  * 退出码：0 = 全部通过，1 = 存在失败
  * 截图输出：.workbuddy/tools/shots/（已 gitignore，仅供人工目检）
@@ -37,6 +38,7 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const zlib = require('zlib');
 
 const EDGE = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 const PORT = 9333;
@@ -71,6 +73,63 @@ function assertEq(name, actual, expected, tol) {
   tol = tol === undefined ? 0.6 : tol;
   if (typeof actual === 'number' && Math.abs(actual - expected) <= tol) ok(name);
   else fail(name, '期望 ' + expected + ' \u00b1' + tol + '，实测 ' + actual);
+}
+
+/* ================= 截图像素体检（抓「断言全绿、画面全黑」） =================
+   为什么必须有这一层：本项目所有可见性断言走的都是 computed opacity（`effOpacity`
+   沿祖先链累乘），它只反映元素**自身**与**祖先**的透明度，**完全不反映
+   「上面压着一层不透明的黑幕」**。于是「黑幕忘摘 .in」这类 bug 会让
+   act / bg / 文字的 opacity 全部等于 1、所有断言全绿，而玩家看到的是纯黑。
+   （真实案例：第八幕 E1 漏 remove('in')。）
+   这里直接解 PNG 取像素亮度，作为「画面确实画出来了」的最后一道防线。 */
+function pngStats(file) {
+  const buf = fs.readFileSync(file);
+  let off = 8, w = 0, h = 0, bd = 0, ct = 0;
+  const idat = [];
+  while (off + 8 <= buf.length) {
+    const len = buf.readUInt32BE(off);
+    const type = buf.toString('ascii', off + 4, off + 8);
+    const data = buf.subarray(off + 8, off + 8 + len);
+    if (type === 'IHDR') { w = data.readUInt32BE(0); h = data.readUInt32BE(4); bd = data[8]; ct = data[9]; }
+    else if (type === 'IDAT') idat.push(data);
+    else if (type === 'IEND') break;
+    off += 12 + len;
+  }
+  // 只处理 8bit 无隔行的 RGB / RGBA / Gray（Chrome 截图就是这三类）
+  if (bd !== 8 || (ct !== 6 && ct !== 2 && ct !== 0) || !idat.length) return null;
+  const bpp = ct === 6 ? 4 : ct === 2 ? 3 : 1;
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const stride = w * bpp;
+  const out = Buffer.alloc(h * stride);
+  let maxLuma = 0, bright = 0, corner = -1;
+  for (let y = 0; y < h; y++) {
+    const f = raw[y * (stride + 1)];
+    const rowIn = y * (stride + 1) + 1;
+    const rowOut = y * stride;
+    for (let x = 0; x < stride; x++) {
+      const a = x >= bpp ? out[rowOut + x - bpp] : 0;
+      const b = y > 0 ? out[rowOut - stride + x] : 0;
+      const c = (x >= bpp && y > 0) ? out[rowOut - stride + x - bpp] : 0;
+      let v = raw[rowIn + x];
+      if (f === 1) v += a;
+      else if (f === 2) v += b;
+      else if (f === 3) v += ((a + b) >> 1);
+      else if (f === 4) {
+        const p = a + b - c;
+        const pa = Math.abs(p - a), pb = Math.abs(p - b), pc = Math.abs(p - c);
+        v += (pa <= pb && pa <= pc) ? a : (pb <= pc ? b : c);
+      }
+      out[rowOut + x] = v & 255;
+    }
+    for (let x = 0; x < w; x++) {
+      const i = rowOut + x * bpp;
+      const lum = ct === 0 ? out[i] : Math.round(0.299 * out[i] + 0.587 * out[i + 1] + 0.114 * out[i + 2]);
+      if (lum > maxLuma) maxLuma = lum;
+      if (lum > 60) bright++;
+      if (y === 0 && x === 0) corner = lum;
+    }
+  }
+  return { w, h, maxLuma, bright, corner };
 }
 
 /* ================= CDP 客户端 ================= */
@@ -158,7 +217,7 @@ const INK_TOP_FN = `(() => {
 /* ================= 主流程 ================= */
 (async () => {
   const which = process.argv.slice(2).filter((a) => !a.startsWith('-'));
-  const cases = which.length ? which : ['gate', 'p1', 'p2', 'flow', 'a3', 'a3b', 'a3c', 'a4', 'a5', 'a5b', 'a6', 'a6b', 'a6c', 'bgm', 'bgm2', 'bgm3', 'full2', 'full3', 'full4'];
+  const cases = which.length ? which : ['gate', 'p1', 'p2', 'flow', 'a3', 'a3b', 'a3c', 'a4', 'a5', 'a5b', 'a6', 'a6b', 'a6c', 'a7', 'bgm', 'bgm2', 'bgm3', 'full2', 'full3', 'full4'];
 
   const child = spawn(EDGE, [
     '--headless=new', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
@@ -292,15 +351,15 @@ const INK_TOP_FN = `(() => {
   async function caseGate() {
     const SCENE_SNAP = `(() => {
       const eff = (el) => { let o = 1, n = el; while (n && n !== document.documentElement) { o *= parseFloat(getComputedStyle(n).opacity); n = n.parentElement; } return +o.toFixed(3); };
-      const ids = ['act1', 'act2', 'act3', 'act4', 'act5', 'act6', 'bg-room-suitcase', 'bg-inside', 'shadow', 'bg-picture', 'frame-picture', 'shadow6', 'goal02', 'continue6'];
+      const ids = ['act1', 'act2', 'act3', 'act4', 'act5', 'act6', 'act7', 'act8', 'bg-room-suitcase', 'bg-inside', 'shadow', 'bg-picture', 'frame-picture', 'shadow6', 'goal02', 'continue6', 'bg-paper-choose', 'bg-balck'];
       const out = {};
       ids.forEach((id) => { const el = document.getElementById(id); if (el) out[id] = eff(el); });
       return JSON.stringify(out);
     })()`;
     const snap = async () => JSON.parse(await evaluate(SCENE_SNAP));
-    // 幕内常驻/半透明层的**自身** opacity（幕级门控兜不住它们，必须各自门控 —— R25）
+    // 幕内常驻/半透明层的**自身** opacity（幕级门控兜不住它们，必须各自门控 —— R25 / R41）
     const OWN_OPACITY = `(() => {
-      const ids = ['shadow6', 'goal02', 'continue6'];
+      const ids = ['shadow6', 'goal02', 'continue6', 'all-picture-choose', 'btn-identify', 'btn-corners', 'the-end'];
       const out = {};
       ids.forEach((id) => { const el = document.getElementById(id); out[id] = el ? +(+getComputedStyle(el).opacity).toFixed(3) : null; });
       return JSON.stringify(out);
@@ -320,10 +379,24 @@ const INK_TOP_FN = `(() => {
     assertEq('gate 载入时第六幕木桌不可见（1200x896 常驻图，R24）', s1['bg-picture'], 0, 0.01);
     assertEq('gate 载入时第六幕右侧底板不可见（356x896、主体不透明，R24）', s1['frame-picture'], 0, 0.01);
     assertEq('gate 载入时第六幕蒙黑层不可见（全屏 70% 蒙黑图）', s1['shadow6'], 0, 0.01);
+    /* v2.26 新增（R41）：第七 / 八幕的 z-index（7 / 8）高于前六幕，而两幕各有一张
+       1200x896、α 恒 255 的全屏不透明背景（bg-paper-choose / bg-balck）→
+       容器漏写 opacity:0 就会从载入第一帧起盖住整部 Demo（D4 的第四次翻版）。 */
+    assertEq('gate 载入时第七幕整幕不可见（z=7 高于前六幕、幕内是全屏不透明图 —— R41）', s1.act7, 0, 0.01);
+    assertEq('gate 载入时第八幕整幕不可见（z=8 最高，漏门控必盖住全部前七幕 —— R41）', s1.act8, 0, 0.01);
+    assertEq('gate 载入时第七幕石墙背景不可见（1200x896、α 恒 255 常驻图）', s1['bg-paper-choose'], 0, 0.01);
+    assertEq('gate 载入时第八幕纯黑背景不可见（1200x896、α 恒 255 常驻图）', s1['bg-balck'], 0, 0.01);
     const o1 = await own();
     assertEq('gate 载入时 #shadow6 自带 opacity:0（幕级门控兜不住它 —— R25）', o1.shadow6, 0, 0.01);
     assertEq('gate 载入时 #goal02 自带 opacity:0', o1.goal02, 0, 0.01);
     assertEq('gate 载入时 #continue6 自带 opacity:0', o1.continue6, 0, 0.01);
+    /* v2.26（R41）：#act7 的 .active 从 D1 起常驻 → 幕级门控兜不住幕内三件，
+       漏了会让主图 + 两枚按钮在「黑幕一淡出的同一帧」齐现（D2 / D3 节奏全丢）。 */
+    assertEq('gate 载入时 #all-picture-choose 自带 opacity:0（否则 D2 的淡入节奏丢失）', o1['all-picture-choose'], 0, 0.01);
+    assertEq('gate 载入时 #btn-identify 自带 opacity:0（否则 D3 的滑入节奏丢失）', o1['btn-identify'], 0, 0.01);
+    assertEq('gate 载入时 #btn-corners 自带 opacity:0', o1['btn-corners'], 0, 0.01);
+    assertEq('gate 载入时 #the-end 自带 opacity:0（否则会与 bg-balck 同帧亮起，丢掉「先黑底、后浮现」）',
+      o1['the-end'], 0, 0.01);
     await shot('gate-1-act1-start');
 
     // ② 第二幕进行中：第一幕退场、第三 ~ 六幕仍不可见
@@ -357,13 +430,16 @@ const INK_TOP_FN = `(() => {
     assertEq('gate 第三幕时第六幕仍不可见', s3.act6, 0, 0.01);
     assertEq('gate 第三幕时第六幕木桌仍不可见', s3['bg-picture'], 0, 0.01);
     assertEq('gate 第三幕时第六幕底板仍不可见', s3['frame-picture'], 0, 0.01);
+    assertEq('gate 第三幕时第七幕仍不可见', s3.act7, 0, 0.01);
+    assertEq('gate 第三幕时第八幕仍不可见', s3.act8, 0, 0.01);
+    assertEq('gate 第三幕时第七幕石墙背景仍不可见', s3['bg-paper-choose'], 0, 0.01);
 
     // ④ 各幕必须是「自包含的堆叠上下文」：否则幕内高 z-index 元素会跑到 #stage 层，
     //    盖住层级更高但幕内元素 z-index 更低的后续幕。
     //    真实案例：第五幕视频在放，而 #act4 的 #goal01(z=95) 压在 #act5(z=5) 之上，
     //    表现为「第五幕对话背后还透着 Goal Achieved 卡片」—— 所有几何断言全绿。
     const gc = await evaluate(`(() => {
-      const ids = ['act1','act2','act3','act4','act5','act6'];
+      const ids = ['act1','act2','act3','act4','act5','act6','act7','act8'];
       const out = {};
       ids.forEach((id) => {
         const el = document.getElementById(id);
@@ -371,7 +447,7 @@ const INK_TOP_FN = `(() => {
       });
       return JSON.stringify(out);
     })()`).then(JSON.parse).catch(() => ({}));
-    for (const id of ['act1','act2','act3','act4','act5','act6']) {
+    for (const id of ['act1','act2','act3','act4','act5','act6','act7','act8']) {
       assertTrue(`gate #${id} 建立自包含堆叠上下文（isolation:isolate）`,
         gc[id] === 'isolate', '实测 isolation = ' + gc[id]);
     }
@@ -452,6 +528,16 @@ const INK_TOP_FN = `(() => {
     assertEq('gate 第六幕 C1/C2 期间 #goal02 自身 opacity 仍为 0', o6.goal02, 0, 0.01);
     assertEq('gate 第六幕 C1/C2 期间 #continue6 自身 opacity 仍为 0', o6.continue6, 0, 0.01);
     assertEq('gate 第六幕 C1/C2 期间 #shadow6 的有效可见度也为 0', s6['shadow6'], 0, 0.01);
+    /* v2.26（R41）：走到第六幕时，第七 / 八幕必须仍整幕不可见 —— 它们的 z-index 更高，
+       一旦门控漏写，此刻就会把刚拼好的第六幕整个盖掉。 */
+    assertEq('gate 第六幕时第七幕仍不可见（z=7 高于第六幕）', s6.act7, 0, 0.01);
+    assertEq('gate 第六幕时第八幕仍不可见（z=8 最高）', s6.act8, 0, 0.01);
+    assertEq('gate 第六幕时第七幕石墙背景仍不可见', s6['bg-paper-choose'], 0, 0.01);
+    assertEq('gate 第六幕时第八幕纯黑背景仍不可见', s6['bg-balck'], 0, 0.01);
+    const o6b = await own();
+    assertEq('gate 第六幕 C1/C2 期间 #all-picture-choose 自身 opacity 仍为 0', o6b['all-picture-choose'], 0, 0.01);
+    assertEq('gate 第六幕 C1/C2 期间 #btn-identify 自身 opacity 仍为 0', o6b['btn-identify'], 0, 0.01);
+    assertEq('gate 第六幕 C1/C2 期间 #the-end 自身 opacity 仍为 0', o6b['the-end'], 0, 0.01);
     await shot('gate-3-act6');
   }
 
@@ -1403,30 +1489,58 @@ const INK_TOP_FN = `(() => {
     assertTrue('bgm3 第六幕 C5 点 Continue 之前第二段仍在播（跨整幕不中断）', c5.paused === false,
       'paused = ' + c5.paused + ' / currentTime = ' + c5.currentTime.toFixed(2));
 
-    /* ---- 8. ★ C5 点 Continue = 第二段停止，且与黑幕渐入**同一帧**（Q60） ----
-       判据：点完的那一次采样里，黑幕已挂 .in（说明第 4 拍回调已执行）但**尚未到顶**，
-       而 bgm2 已经 paused —— 若写成「黑幕跑完再停」，这里会采到 paused = false 而假红。 */
+    /* ---- 8. ★ v2.26 · Q62：C5 点 Continue **不是**停止点（已后移到第八幕 E2） ----
+       ⚠️ 本节是本用例改动最大的地方：v2.24 · Q60 曾把「C5 点 Continue 的同一帧」定为
+          第二段的停止点，v2.26 · Q62 起**该口径作废** —— 停止点在第八幕
+          「the-end 淡入完成的那一帧」（需求 §11.1 E2）。
+          ⚠️ 这也是「断言仍绿、语义已废」的典型：若实现忘了把 stopBGM2 从 C5 摘走，
+             第七幕会全程无声，而旧断言「点 Continue 后 paused === true」**仍然会通过**。 */
     await click('#continue6');
-    const same = await evaluate(`(() => {
+    const atC5 = await evaluate(`(() => {
       const b = document.getElementById('blackout');
       const s = window.__nj.state();
       return { blackoutIn: b.classList.contains('in'), blackoutOp: +getComputedStyle(b).opacity,
                wanted2: s.bgm2.wanted, paused2: s.bgm2.paused,
                current2: s.bgm2.currentTime, paused1: s.bgm.paused }; })()`);
-    assertTrue('bgm3 点 Continue 后第二段已停（同帧 stopBGM2，wanted = false）',
-      same.paused2 === true && same.wanted2 === false, JSON.stringify(same));
-    assertEq('bgm3 停止后第二段 currentTime 归零（下次起播从头）', same.current2, 0, 0.01);
-    assertTrue('bgm3 停止与黑幕渐入同帧：黑幕已挂 .in 但尚未到顶（不是「黑幕跑完才停」）',
-      same.blackoutIn === true && same.blackoutOp < 1, JSON.stringify(same));
-    assertTrue('bgm3 全片终点时第一段同样保持停止（两段都静音）', same.paused1 === true);
+    assertTrue('bgm3 ⚠️ v2.26 · Q62：点 Continue 后第二段**仍在播**（C5 已不再是停止点）',
+      atC5.paused2 === false && atC5.wanted2 === true, JSON.stringify(atC5));
+    assertTrue('bgm3 点 Continue 与黑幕渐入同帧：黑幕已挂 .in 但尚未到顶',
+      atC5.blackoutIn === true && atC5.blackoutOp < 1, JSON.stringify(atC5));
+    assertTrue('bgm3 C5 收尾时第一段保持停止（Q32）', atC5.paused1 === true);
 
-    /* ---- 9. 终点滞留期不得复播 ---- */
-    await waitFor(`window.__nj.state().act6.done === true`, 5000, '全片终点标记');
-    await waitFor(`+getComputedStyle(document.getElementById('blackout')).opacity === 1`, 5000, '黑幕到顶');
-    await sleep(500);
+    /* ---- 9. 跨第六 → 第七幕的幕间转场不中断（Q62） ---- */
+    await waitFor(`window.__nj.state().act7.active === true`, 12000, '第七幕激活');
+    assertTrue('bgm3 跨「第六幕 → 第七幕」的黑幕转场后第二段仍在播（转场不是停止点）',
+      (await st2()).paused === false);
+    await waitFor(`window.__nj.state().act7.buttonsReady === true`, 12000, '第七幕两钮滑入完成');
+    await sleep(300);
+    const at7 = await st2();
+    assertTrue('bgm3 第七幕整幕第二段持续播放（paused = false）', at7.paused === false,
+      'paused = ' + at7.paused + ' / currentTime = ' + at7.currentTime.toFixed(2));
+    assertTrue('bgm3 跨第六 → 第七幕 currentTime 继续推进（未重启回零）',
+      at7.currentTime >= c5.currentTime, c5.currentTime.toFixed(2) + ' -> ' + at7.currentTime.toFixed(2));
+    await shot('bgm3-2-act7');
+
+    /* ---- 10. ★ 第八幕 the-end 淡入完成帧 = 第二段停止（＝全片终点，Q62） ---- */
+    await click('#btn-identify');
+    await waitFor(`window.__nj.state().act8.active === true`, 12000, '第八幕激活');
+    assertTrue('bgm3 跨「第七幕 → 第八幕」的黑幕转场后第二段仍在播（the-end 尚未浮现）',
+      (await st2()).paused === false);
+    await waitFor(`window.__nj.state().act8.done === true`, 12000, 'THE END 淡入完成（全片终点）');
     const fin = await njState();
-    assertTrue('bgm3 全片终点后第二段保持停止（未复播）', fin.bgm2.paused === true);
-    assertTrue('bgm3 全片终点后两段均静音（bgm + bgm2）', fin.bgm.paused === true && fin.bgm2.paused === true);
+    assertTrue('bgm3 ★ 第八幕 the-end 淡入完成帧第二段停止（Q62：全片唯一停止点）',
+      fin.bgm2.paused === true && fin.bgm2.wanted === false, JSON.stringify(fin.bgm2));
+    assertEq('bgm3 停止后第二段 currentTime 归零', fin.bgm2.currentTime, 0, 0.01);
+    assertTrue('bgm3 全片终点时第一段同样保持停止（两段都静音）', fin.bgm.paused === true);
+    assertTrue('bgm3 第八幕 THE END 已浮现（终点画面 = 黑底 + 白字，不再是「全黑滞留」）',
+      fin.act8.theEndIn === true);
+    await shot('bgm3-3-the-end');
+
+    /* ---- 11. 终点滞留期不得复播 ---- */
+    await sleep(700);
+    const fin2 = await njState();
+    assertTrue('bgm3 全片终点后第二段保持停止（未复播）', fin2.bgm2.paused === true);
+    assertTrue('bgm3 全片终点后两段均静音（bgm + bgm2）', fin2.bgm.paused === true && fin2.bgm2.paused === true);
   }
 
   async function caseA4() {
@@ -1615,11 +1729,13 @@ const INK_TOP_FN = `(() => {
       })()`));
     assertTrue('a4 到达第四幕末时第六幕仍未激活（幕级门控）',
       !(await hasClass('#act6', 'active')) && (await effOpacity('#act6')) === 0);
-    assertTrue('a4 #act7-slot 预留容器仍为空',
+    assertTrue('a4 #act8-slot 预留容器仍为空（⚠️ v2.26：原 #act7-slot 已升为第七幕实际容器 #act7）',
       await evaluate(`(() => {
-        const s7 = document.getElementById('act7-slot');
-        return !!s7 && s7.children.length === 0 && s7.textContent.trim() === '';
+        const s8 = document.getElementById('act8-slot');
+        return !!s8 && s8.children.length === 0 && s8.textContent.trim() === '';
       })()`));
+    assertTrue('a4 旧 #act7-slot 已退役（第七幕升为 #act7 实际容器）',
+      await evaluate(`document.getElementById('act7-slot') === null`));
     assertTrue('a4 旧 #act5-slot 已退役（第五幕升为 #act5 实际容器）',
       await evaluate(`document.getElementById('act5-slot') === null`));
     assertTrue('a4 旧 #act6-slot 已退役（第六幕升为 #act6 实际容器）',
@@ -2796,31 +2912,357 @@ const INK_TOP_FN = `(() => {
       !(await hasClass('#blackout', 'in')));
     await shot('a6c-3-goal2');
 
-    // ---------- C5 第 4 拍：点击 → 同帧三撤场 + 黑幕渐入 → 全黑滞留（终点，Q53） ----------
+    // ---------- C5 第 4 拍：点击 → 同帧三撤场 + 黑幕渐入 → **转场进第七幕**（v2.26） ----------
+    /* ⚠️ v2.26 · Q62 起 C5 **不再是全片终点**：黑幕到顶后不再滞留，而是「停留 500ms
+       即作为幕间转场进入第七幕」（需求 §10.2 · D1）—— 终点已第 5 次后移（→ 第八幕）。
+       ⚠️ 采样策略随之改变：黑幕到顶（点后 ~400ms）→ #act7 激活（点后 ~900ms）之间只剩
+          500ms，任何「先 waitFor 再多次往返采样」的写法都可能踩过界（黑幕已在淡出）。
+          因此改用**页面内探针**记录「黑幕 opacity 曾经到顶」；而三件撤场与两段 BGM 的
+          状态都是**终态**（第七幕不碰它们），可随时采样。 */
+    await evaluate(`(() => {
+      window.__c5 = { maxOp: 0 };
+      const t0 = performance.now();
+      window.__c5Timer = setInterval(() => {
+        const op = +getComputedStyle(document.getElementById('blackout')).opacity;
+        if (op > window.__c5.maxOp) window.__c5.maxOp = op;
+        if (performance.now() - t0 > 20000) clearInterval(window.__c5Timer);
+      }, 16);
+      return true;
+    })()`);
     await click('#continue6');
-    await waitFor(`+getComputedStyle(document.getElementById('blackout')).opacity === 1`, 5000, '黑幕到顶（全黑）');
-    await sleep(120);
-    assertEq('a6c 点击 Continue 后 Goal 2 已撤场', await effOpacity('#goal02'), 0, 0.01);
-    assertEq('a6c 点击 Continue 后蒙黑层 shadow6 已撤场（黑幕跑完时无残留灰罩）',
-      await effOpacity('#shadow6'), 0, 0.01);
-    assertEq('a6c 点击 Continue 后 Continue 按钮已撤场', await effOpacity('#continue6'), 0, 0.01);
-    assertTrue('a6c shadow6 已挂 .out（退场压到 0.4s）', await hasClass('#shadow6', 'out'));
-    assertTrue('a6c Continue 已挂 .out（退场压到 0.15s，短于黑幕 0.4s）', await hasClass('#continue6', 'out'));
-    assertTrue('a6c Continue 已脱离 .in（不靠 0.3s 淡出拖尾）', !(await hasClass('#continue6', 'in')));
-    assertEq('a6c 终点画面纯黑', await effOpacity('#blackout'), 1, 0.01);
-    assertTrue('a6c 全黑滞留 = 全片终（不重播、不加文字、不回到第一幕）',
-      await waitFor(`window.__nj.state().act6.done === true`, 4000, '全片终标记'));
+    await waitFor(`window.__nj.state().act6.done === true`, 6000, 'C5 收尾完成');
+    /* ⚠️ `act6.done` 在 `anim(400)` 一到点就置位，而**此刻黑幕的 400 ms 渐入与
+       `#shadow6` 的 400 ms 退场都还在收尾**（两者与 `anim(400)` 同刻开始，谁先到点不确定）
+       —— 首版在这里假红：shadow6 采到 0.012、黑幕峰值只采到 0.988。
+       等这两个 400 ms 过渡真正结束再采样；距第七幕摘 `.in`（点后 ~900 ms）仍有富余。 */
+    await sleep(150);
+    const c5end = await evaluate(`(() => {
+      const cs = (id) => +getComputedStyle(document.getElementById(id)).opacity;
+      const has = (id, c) => document.getElementById(id).classList.contains(c);
+      const st = window.__nj.state();
+      return JSON.stringify({
+        goal02: cs('goal02'), shadow6: cs('shadow6'), continue6: cs('continue6'),
+        shadow6Out: has('shadow6', 'out'), continue6Out: has('continue6', 'out'),
+        continue6In: has('continue6', 'in'),
+        bgmPaused: st.bgm.paused, bgm2Paused: st.bgm2.paused,
+        glow: st.act6.allPictureGlow, btnAgainOut: has('btn-again', 'out'), act6UiOut: has('act6', 'ui-out')
+      });
+    })()`).then(JSON.parse);
+    assertEq('a6c 点击 Continue 后 Goal 2 已撤场', c5end.goal02, 0, 0.01);
+    assertEq('a6c 点击 Continue 后蒙黑层 shadow6 已撤场（黑幕跑完时无残留灰罩）', c5end.shadow6, 0, 0.02);
+    assertEq('a6c 点击 Continue 后 Continue 按钮已撤场', c5end.continue6, 0, 0.01);
+    assertTrue('a6c shadow6 已挂 .out（退场压到 0.4s）', c5end.shadow6Out === true);
+    assertTrue('a6c Continue 已挂 .out（退场压到 0.15s，短于黑幕 0.4s）', c5end.continue6Out === true);
+    assertTrue('a6c Continue 已脱离 .in（不靠 0.3s 淡出拖尾）', c5end.continue6In === false);
+    assertEq('a6c 点击 Continue 后黑幕确实到过顶（探针记录峰值 opacity = 全黑）',
+      await evaluate(`window.__c5.maxOp`), 1, 0.02);
+    assertTrue('a6c C5 收尾完成标记 act6.done（⚠️ v2.26：它只代表「C5 这一拍走完」，不再是全片终点）',
+      await evaluate(`window.__nj.state().act6.done === true`));
     assertTrue('a6c 幕内「保留」的元素在点击后仍未被淡出（Q55）',
-      (await njState()).act6.allPictureGlow === true &&
-      !(await hasClass('#btn-again', 'out')) &&
-      !(await hasClass('#act6', 'ui-out')));
-    assertTrue('a6c 第六幕【第一段】BGM 保持停止（Q32；第二段在 C5 同帧停止）',
-      (await njState()).bgm.paused === true);
-    await shot('a6c-4-final-black');
+      c5end.glow === true && c5end.btnAgainOut === false && c5end.act6UiOut === false);
+    assertTrue('a6c 第六幕【第一段】BGM 保持停止（Q32）', c5end.bgmPaused === true);
+    assertTrue('a6c ⚠️ v2.26 · Q62：C5 点 Continue 时第二段 BGM **仍在播**（停止点已后移到第八幕 E2）',
+      c5end.bgm2Paused === false);
+    await shot('a6c-4-c5-blackout');
+
+    // ---------- v2.26：C5 → 第七幕（黑幕到顶后转场，不再滞留） ----------
+    await waitFor(`window.__nj.state().act7.active === true`, 10000, '第七幕激活（C5 后转场）');
+    assertTrue('a6c ⚠️ v2.26：C5 之后确实进入了第七幕（原「全黑滞留＝全片终」已作废）',
+      await evaluate(`window.__nj.state().act7.active === true`));
+    /* ⚠️ 这条守的是「旧终点残留态 ①」：C5 的 blackout.add('in') 从不摘除，
+       第七幕 D1 若不 remove('in')，黑幕 opacity 会永远停在 1、bg-paper-choose
+       永远看不到 —— 而**所有其它断言都不会失败**（没人断言过 blackout 的透明度）。 */
+    assertTrue('a6c C5 交接给第七幕时已摘掉 #blackout 的 .in（清残留态 ①）',
+      await waitFor(`!document.getElementById('blackout').classList.contains('in')`, 3000, '清残留态 ①'));
+    assertTrue('a6c 黑幕真的在淡出（bg-paper-choose 不会被永久遮住）',
+      await waitFor(`+getComputedStyle(document.getElementById('blackout')).opacity < 1`, 3000, '黑幕开始淡出'));
   }
 
-  /* ================= 用例 full4：第一 ~ 第六幕全流程（两段视频真播） =================
-     验证真实时序、终点第四次后移后的副作用与末态滞留。 */
+  /* ================= 用例 a7：第七幕「抉择」+ 第八幕「终幕」（需求 §10 / §11） =================
+     守住四件事（前三件都属「写错不会有任何断言报错」的静默失败类）：
+       ① **两个旧终点残留态**的处置 —— C5 留下的 `#blackout.in` 必须由 D1 摘掉
+          （不摘则黑幕永不淡出、石墙背景永远看不到），而 C1 挂的 `.fast` 在 D1
+          **不许摘**（D1 的 400ms 淡出正好要它）、到 D3 才摘、进 E1 再挂回；
+       ② D1 的黑幕淡出确实按 **400ms**（若 `.fast` 被误摘，会静默跑成 700ms）；
+       ③ D2 / D3 的出现节奏与几何（主图 372.5/228、两钮 355.5/641 与 355.5/762）；
+       ④ D3 的**起手位移按各自落点算**（identify 255 / corners 134），
+          而不是全片按钮规范里写死的 150px。
+     第八幕：bg-balck 露出 → THE END 淡入 600ms → 该帧停第二段 BGM（＝全片终点，Q62 / Q63）。 */
+  async function caseA7() {
+    await toAct6Play();
+    await solveAllPieces();
+    await waitFor(`window.__nj.state().act6.shadow6In === true`, 15000, 'C5 蒙黑');
+    await waitFor(`document.getElementById('continue6').classList.contains('in')`, 15000, 'C5 Continue 滑入');
+    await sleep(700);
+
+    /* ---- 进第七幕之前：.fast 残留态还在（这正是第七幕要接手的「烂摊子」） ---- */
+    assertTrue('a7 残留态 ②：进第七幕前 #blackout 仍挂着 .fast（C1 加的、此后从未摘除）',
+      await hasClass('#blackout', 'fast'));
+
+    /* D1 淡出时长探针。⚠️ 计时起点必须是「#act7 激活的那一帧」（＝黑幕开始淡出的那一帧）：
+       若从外面直接起计时，会先把「C5 之前黑幕本就 transparent（opacity 0）」误判成
+       「已淡出完成」——首版就因此采到 23ms 的假值。 */
+    await evaluate(`(() => {
+      window.__fade = { ms: -1, t0: 0 };
+      const tStart = performance.now();
+      const tm = setInterval(() => {
+        if (!window.__fade.t0 && document.getElementById('act7').classList.contains('active')) {
+          window.__fade.t0 = performance.now();
+        }
+        if (window.__fade.t0 && window.__fade.ms < 0 &&
+            +getComputedStyle(document.getElementById('blackout')).opacity < 0.05) {
+          window.__fade.ms = Math.round(performance.now() - window.__fade.t0);
+          clearInterval(tm);
+        }
+        if (performance.now() - tStart > 15000) { clearInterval(tm); }
+      }, 8);
+      return true;
+    })()`);
+    // D3 滑入探针：同时采两枚按钮的 translateY（「起手位移按各自落点算」+「同帧滑入」）
+    await evaluate(`(() => {
+      window.__slide = { ident: [], corners: [] };
+      const read = (id, arr) => {
+        const cs = getComputedStyle(document.getElementById(id));
+        const m = cs.transform;
+        let ty = 0;
+        if (m && m.indexOf('matrix') === 0) {
+          const n = m.slice(m.indexOf('(') + 1, m.lastIndexOf(')')).split(',').map(Number);
+          ty = (n.length === 6) ? n[5] : n[13];
+        }
+        arr.push({ t: Math.round(performance.now()), ty: +ty.toFixed(2), op: +(+cs.opacity).toFixed(3) });
+      };
+      const t0 = performance.now();
+      window.__slideTimer = setInterval(() => {
+        read('btn-identify', window.__slide.ident);
+        read('btn-corners', window.__slide.corners);
+        if (performance.now() - t0 > 8000) clearInterval(window.__slideTimer);
+      }, 10);
+      return true;
+    })()`);
+
+    await click('#continue6');
+    assertTrue('a7 残留态 ①：C5 点 Continue 后 #blackout 挂上 .in 且**此后从不摘除**（旧终点留下的状态）',
+      await waitFor(`document.getElementById('blackout').classList.contains('in')`, 2000, '黑幕 .in 已挂'));
+    await waitFor(`window.__nj.state().act7.active === true`, 15000, '第七幕激活');
+    assertTrue('a7 ⚠️ 残留态 ① 已清理：#act7 激活时摘掉了 #blackout 的 .in（否则黑幕永不淡出）',
+      !(await hasClass('#blackout', 'in')));
+    assertTrue('a7 ⚠️ 残留态 ② 未被动过：#act7 激活时 #blackout 仍挂着 .fast（D1 的 400ms 淡出要它）',
+      await hasClass('#blackout', 'fast'));
+    assertTrue('a7 D1 黑幕过渡时长仍为 0.4s（.fast 此刻确实还挂着 —— R37）',
+      (await evaluate(`getComputedStyle(document.getElementById('blackout')).transitionDuration`)) === '0.4s');
+
+    /* ⚠️ 起手位移必须在 D3 加 `.in` **之前**读 —— 之后 transform 会插值到 0 */
+    const preSlide = await evaluate(`(() => {
+      const cs = (id) => getComputedStyle(document.getElementById(id));
+      return JSON.stringify({
+        ident: cs('btn-identify').transform, corners: cs('btn-corners').transform,
+        identPe: cs('btn-identify').pointerEvents, cornersPe: cs('btn-corners').pointerEvents,
+        identOp: +(+cs('btn-identify').opacity).toFixed(3)
+      });
+    })()`).then(JSON.parse);
+    assertTrue('a7 D3 起手位移 identify = translateY(255px)（896 − 641，按各自落点算；全片写死的 150px 只推到 791）',
+      preSlide.ident.indexOf('255') >= 0, preSlide.ident);
+    assertTrue('a7 D3 起手位移 corners = translateY(134px)（896 − 762）',
+      preSlide.corners.indexOf('134') >= 0, preSlide.corners);
+    assertTrue('a7 D3 滑入之前两枚都不可点（pointer-events:none）',
+      preSlide.identPe === 'none' && preSlide.cornersPe === 'none');
+    assertTrue('a7 D3 滑入之前两枚都还不可见（opacity = 0；幕级门控兜不住它们，各自门控才有效）',
+      preSlide.identOp === 0);
+
+    /* ---- D1：黑幕淡出 400ms（不是默认的 700ms） ---- */
+    await waitFor(`+getComputedStyle(document.getElementById('blackout')).opacity === 0`, 4000, '黑幕完全淡出');
+    const fade = await evaluate(`window.__fade.ms`);
+    assertTrue('a7 D1 黑幕淡出 ≈400ms（实测 ' + fade + 'ms；若 .fast 被误摘会静默跑成 ~700ms）',
+      fade > 200 && fade < 560, 'fade = ' + fade);
+    assertTrue('a7 第七幕整幕已可见', (await effOpacity('#act7')) === 1);
+    assertTrue('a7 D1 石墙背景已露出（自身不带淡入 / 位移，完全靠黑幕淡出 —— 不照抄第五幕 bg-inside）',
+      (await effOpacity('#bg-paper-choose')) === 1);
+    assertTrue('a7 D1 石墙背景已**解码就绪**（naturalWidth = 1200 —— 守 R40：1.69MB 大图的预取必须在黑幕淡出前 await）',
+      (await evaluate(`document.getElementById('bg-paper-choose').naturalWidth`)) === 1200);
+    assertTrue('a7 石墙背景是 α 恒 255 的不透明全屏图（靠幕级门控藏住，D4 的第四次翻版风险点）',
+      await evaluate(`(() => new Promise((resolve) => {
+        const im = new Image();
+        im.onload = () => {
+          const c = document.createElement('canvas');
+          c.width = im.naturalWidth; c.height = im.naturalHeight;
+          const x = c.getContext('2d');
+          x.drawImage(im, 0, 0);
+          const pts = [[8, 8], [600, 400], [1190, 880]];
+          resolve(pts.every((p) => x.getImageData(p[0], p[1], 1, 1).data[3] === 255));
+        };
+        im.src = 'assets/screen8/bg-paper-choose.png';
+      }))()`));
+
+    /* ---- D2：主图淡入 400ms + 常驻外发光 ---- */
+    await waitFor(`window.__nj.state().act7.allPictureChooseIn === true`, 8000, '主图淡入');
+    await waitFor(`window.__nj.state().act7.allPictureChooseGlow === true`, 8000, '主图发光挂上');
+    await sleep(200);
+    const pic = await box('#all-picture-choose');
+    assertEq('a7 D2 主图 left = 372.5（(1200−455)/2，用户给定「整体居中」= 水平居中）', pic.left, 372.5, 0.6);
+    assertEq('a7 D2 主图 top = 228（用户给定）', pic.top, 228, 0);
+    assertEq('a7 D2 主图尺寸 455x369（按素材原像素摆放、不缩放）', pic.width * 1000 + pic.height, 455369, 0);
+    assertEq('a7 D2 主图已完全可见', await effOpacity('#all-picture-choose'), 1, 0.02);
+    assertTrue('a7 D2 外发光是 CSS 关键帧 picGlow（素材里没有发光版）',
+      (await evaluate(`getComputedStyle(document.getElementById('all-picture-choose')).animationName`)).indexOf('picGlow') >= 0);
+    assertTrue('a7 D2 ✅Q66 发光常驻：周期 1.6s、无限循环（与第六幕 picGlow 同口径）',
+      (await evaluate(`(() => {
+        const cs = getComputedStyle(document.getElementById('all-picture-choose'));
+        const names = cs.animationName.split(',').map(function (s) { return s.trim(); });
+        const durs = cs.animationDuration.split(',').map(function (s) { return s.trim(); });
+        const iters = cs.animationIterationCount.split(',').map(function (s) { return s.trim(); });
+        const i = names.indexOf('picGlow');
+        return i < 0 ? '' : durs[i] + '|' + iters[i];
+      })()`)) === '1.6s|infinite');
+    assertTrue('a7 D2 主图是「纯淡入」：不带位移、不缩放（用户原文只说「出现」）',
+      await evaluate(`(() => {
+        const cs = getComputedStyle(document.getElementById('all-picture-choose'));
+        return cs.transform === 'none' || cs.transform === 'matrix(1, 0, 0, 1, 0, 0)';
+      })()`));
+
+    /* ---- D3：两枚按钮同帧自下而上滑入 500ms → 完成才可点 ---- */
+    await waitFor(`window.__nj.state().act7.buttonsReady === true`, 12000, '两钮滑入完成');
+    const btnI = await box('#btn-identify');
+    const btnC = await box('#btn-corners');
+    assertEq('a7 D3 identify left = 355.5（(1200−489)/2，水平居中）', btnI.left, 355.5, 0.6);
+    assertEq('a7 D3 identify top = 641（距底 162）', btnI.top, 641, 0);
+    assertEq('a7 D3 identify 尺寸 489x93', btnI.width * 1000 + btnI.height, 489093, 0);
+    assertEq('a7 D3 corners left = 355.5（与 identify 水平同槽）', btnC.left, 355.5, 0.6);
+    assertEq('a7 D3 corners top = 762（距底 42）', btnC.top, 762, 0);
+    assertEq('a7 D3 corners 尺寸 489x92', btnC.width * 1000 + btnC.height, 489092, 0);
+    assertEq('a7 D3 两钮纵向间隔 28px', btnC.top - (btnI.top + btnI.height), 28, 1);
+    assertEq('a7 D3 主图与 identify 间隔 44px', btnI.top - (pic.top + pic.height), 44, 1);
+    assertTrue('a7 D3 滑入完成后两枚都可点（pointer-events:auto + cursor:pointer）',
+      btnI.pointerEvents === 'auto' && btnC.pointerEvents === 'auto');
+    assertTrue('a7 D3 滑入完成后两枚都已完全可见',
+      (await effOpacity('#btn-identify')) === 1 && (await effOpacity('#btn-corners')) === 1);
+
+    const slide = await evaluate(`(() => { clearInterval(window.__slideTimer); return JSON.stringify(window.__slide); })()`).then(JSON.parse);
+    const firstTy = (arr) => (arr.length ? arr[0].ty : null);
+    const lastTy = (arr) => (arr.length ? arr[arr.length - 1].ty : null);
+    assertTrue('a7 D3 探针 identify：起手 translateY = 255（起手整张在画布下沿之外）',
+      Math.abs(firstTy(slide.ident) - 255) <= 2, 'first ty = ' + firstTy(slide.ident));
+    assertTrue('a7 D3 探针 corners：起手 translateY = 134',
+      Math.abs(firstTy(slide.corners) - 134) <= 2, 'first ty = ' + firstTy(slide.corners));
+    assertTrue('a7 D3 探针 identify：落点 translateY = 0', Math.abs(lastTy(slide.ident)) <= 0.5, 'last ty = ' + lastTy(slide.ident));
+    assertTrue('a7 D3 探针 corners：落点 translateY = 0', Math.abs(lastTy(slide.corners)) <= 0.5, 'last ty = ' + lastTy(slide.corners));
+    assertTrue('a7 D3 探针 identify：确实一路升上来（中途采到 ≥5 个中间态，不是瞬移）',
+      slide.ident.filter((r) => r.ty > 1 && r.ty < 254).length >= 5,
+      'mid = ' + slide.ident.filter((r) => r.ty > 1 && r.ty < 254).length);
+    const tStart = (arr, base) => { for (const r of arr) { if (r.ty < base - 1) return r.t; } return null; };
+    const ti = tStart(slide.ident, 255), tc = tStart(slide.corners, 134);
+    assertTrue('a7 D3 ✅Q64：两枚按钮**同帧**开始滑入（起手时刻差 ≤ 100ms，不取错峰 120ms）',
+      ti !== null && tc !== null && Math.abs(ti - tc) <= 100, 'ti=' + ti + ' tc=' + tc);
+    assertTrue('a7 D3 滑入途中两枚都保持可见（opacity 已为 1，滑入不是「先透明再闪现」）',
+      slide.ident.filter((r) => r.op > 0.9).length >= 5);
+    await shot('a7-1-act7');
+    const png7 = pngStats(path.join(OUT, 'a7-1-act7.png'));
+    assertTrue('a7 🔍 第七幕截图不是全黑（石墙 / 古画 / 两钮确实画出来了；亮像素 ' + (png7 ? png7.bright : 'n/a') + ' 个）',
+      !!png7 && png7.bright > 20000 && png7.maxLuma > 200, JSON.stringify(png7));
+
+    /* ---- 点击任一 → 700ms 黑幕渐入 → 第八幕（Q67：两条独立入口、共用同一收尾） ---- */
+    await click('#btn-identify');
+    assertTrue('a7 点第一枚后立刻上锁（一次性锁，Q67）',
+      await evaluate(`window.__nj.state().act7.chosen === true`));
+    assertTrue('a7 两枚按钮**同帧**一起置为不可再点（防连点）',
+      await evaluate(`window.__nj.state().act7.chosenDead === true`));
+    assertTrue('a7 被点后两枚的 pointer-events 都变 none',
+      (await pointerEventsOf('#btn-identify')) === 'none' &&
+      (await pointerEventsOf('#btn-corners')) === 'none');
+    /* ---- R38：再点第二枚不得跑第二遍收尾 ----
+       ⚠️ 此刻两枚都已 pointer-events:none，真实点击根本打不到它们；这一条守的是
+          「万一屏蔽失效（例如日后有人把 .dead 的 pointer-events 去掉）」时，
+          `act7Chosen` 这把一次性锁仍然拦得住 —— 否则会跑两遍 `chooseToAct8()`，
+          出现「第八幕演到一半又被拉回重演」，而**终态画面仍然正确**、肉眼与终态断言都抓不住。 */
+    await clickCanvas(600, 808);      // corners 中心 (355.5+489/2, 762+92/2)
+    await sleep(250);
+    /* ⚠️ 此刻这一下点击其实被 `#blackout.in`（z=100、全屏、`.in` 时 pointer-events:auto）
+       先吃掉了 —— 所以本断言守的是**双保险**：① 黑幕把点击拦住；② 万一拦住失败，
+       `act7Chosen` 这把一次性锁仍然拦得住「第二遍 chooseToAct8()」。 */
+    assertTrue('a7 ⚠️ R38：先点 identify 再点 corners → 一次性锁生效（chosen / chosenDead 均仍为 true，未跑第二遍收尾）',
+      await evaluate(`window.__nj.state().act7.chosen === true && window.__nj.state().act7.chosenDead === true`));
+    assertTrue('a7 ⚠️ D3 摘掉 .fast（不摘则 700ms 幕间转场静默跑成 400ms）',
+      await waitFor(`!document.getElementById('blackout').classList.contains('fast')`, 2000, '摘 .fast'));
+    assertTrue('a7 D3 黑幕过渡时长已回到 0.7s（.fast 确已摘掉 —— R37）',
+      (await evaluate(`getComputedStyle(document.getElementById('blackout')).transitionDuration`)) === '0.7s');
+    assertTrue('a7 D3 黑幕已开始渐入（.in 已挂）', await hasClass('#blackout', 'in'));
+
+    /* ---- 第八幕：终幕 ---- */
+    await waitFor(`window.__nj.state().act8.active === true`, 12000, '第八幕激活');
+    assertTrue('a7 ⚠️ 残留态 ② 已挂回：进第八幕时 #blackout 重新挂上 .fast（E1 的 400ms 淡出要它，与 D1 相反）',
+      await hasClass('#blackout', 'fast'));
+    assertTrue('a7 E1 黑幕过渡时长回到 0.4s（.fast 已挂回 —— R37）',
+      (await evaluate(`getComputedStyle(document.getElementById('blackout')).transitionDuration`)) === '0.4s');
+    assertEq('a7 第八幕刚激活时 THE END 仍未亮起（先黑底、后浮现）',
+      await effOpacity('#the-end'), 0, 0.02);
+    assertTrue('a7 第八幕已可见', (await effOpacity('#act8')) === 1);
+    assertTrue('a7 第八幕纯黑背景已露出（⚠️ 与 #blackout 几乎同色，但 E1 那一步不能省）',
+      (await effOpacity('#bg-balck')) === 1);
+    assertTrue('a7 ⚠️ 第八幕容器恒 pointer-events:none（无可点元素，不可套第七幕模板）',
+      (await pointerEventsOf('#act8')) === 'none');
+    /* ⚠️⚠️ 下面两条守的是本幕**最隐蔽的坑**（首版就是这么漏的）：
+       D3 刚给 #blackout 加过 .in（700ms 幕间转场），E1 若不 remove('in')，
+       黑幕 opacity 就恒为 1 → **画面全黑到片尾**；而 `state().act8.active`、
+       `effOpacity('#act8')`、`effOpacity('#bg-balck')`、`effOpacity('#the-end')`
+       **全都是「正确」的值，一条断言都不会失败**（effOpacity 沿祖先链累乘，
+       只反映元素自身透明度，**完全不反映上面压着一层不透明的黑幕**）。
+       所以必须独立断言「黑幕真的透明了」—— 取 opacity 与 pointer-events 两个互不相关的证据。 */
+    assertTrue('a7 ⚠️ E1 黑幕必须真的淡出（漏 remove(\'in\') 会全黑到片尾，而所有 opacity 断言仍全绿）',
+      await waitFor(`+getComputedStyle(document.getElementById('blackout')).opacity === 0`, 4000, '黑幕淡出到 0'));
+    assertTrue('a7 E1 黑幕已脱离 .in（pointer-events 回到 none —— 与 opacity 互为独立证据）',
+      (await pointerEventsOf('#blackout')) === 'none');
+
+    await waitFor(`window.__nj.state().act8.theEndIn === true`, 10000, 'THE END 开始淡入');
+    await waitFor(`+getComputedStyle(document.getElementById('the-end')).opacity === 1`, 4000, 'THE END 淡入完成');
+    const te = await box('#the-end');
+    assertEq('a7 E2 THE END left = 411（(1200−378)/2，水平居中）', te.left, 411, 0.6);
+    assertEq('a7 E2 THE END top = 407.5（(896−81)/2，垂直居中 —— ✅Q63 双向居中）', te.top, 407.5, 0.6);
+    assertEq('a7 E2 THE END 尺寸 378x81', te.width * 1000 + te.height, 378081, 0);
+    assertEq('a7 E2 THE END 已完全可见', await effOpacity('#the-end'), 1, 0.02);
+    assertTrue('a7 E2 THE END 是「纯淡入」：无位移、无缩放、无发光（用户原文只说「浮现」）',
+      await evaluate(`(() => {
+        const cs = getComputedStyle(document.getElementById('the-end'));
+        return (cs.transform === 'none' || cs.transform === 'matrix(1, 0, 0, 1, 0, 0)') && cs.animationName === 'none';
+      })()`));
+    assertTrue('a7 THE END 是透明底白字（78.6% 的像素全透明 → 必须叠在 bg-balck 之上）',
+      await evaluate(`(() => new Promise((resolve) => {
+        const im = new Image();
+        im.onload = () => {
+          const c = document.createElement('canvas');
+          c.width = im.naturalWidth; c.height = im.naturalHeight;
+          const x = c.getContext('2d');
+          x.drawImage(im, 0, 0);
+          const d = x.getImageData(0, 0, 1, 1).data;
+          resolve(d[3] === 0);
+        };
+        im.src = 'assets/screen9/the-end.png';
+      }))()`));
+    await shot('a7-2-the-end');
+    /* 🔍 像素级体检（见 pngStats 的注释）：这一步能抓住「所有 opacity 断言全绿、
+       画面却是一片黑」的失效 —— 首版第八幕漏了 remove('in')，就是这种情形。 */
+    const png8 = pngStats(path.join(OUT, 'a7-2-the-end.png'));
+    assertTrue('a7 🔍 第八幕截图不是全黑（THE END 白字确实画在画面上；最亮 ' + (png8 ? png8.maxLuma : 'n/a') + '）',
+      !!png8 && png8.maxLuma > 200 && png8.bright > 300, JSON.stringify(png8));
+    assertTrue('a7 🔍 第八幕截图底色是 #101010 而非纯黑（证明露出的是 bg-balck，不是仍压着一层 #blackout）',
+      !!png8 && png8.corner >= 8 && png8.corner <= 40, JSON.stringify(png8));
+
+    /* ---- ★ 全片终点：BGM 停止（Q62）+ 滞留不复播 ---- */
+    assertTrue('a7 ★ 全片终点（the-end 淡入完成帧）已到达',
+      await waitFor(`window.__nj.state().act8.done === true`, 5000, '全片终点标记'));
+    assertTrue('a7 ★ 全片终点：该帧停第二段 BGM（Q62 全片唯一停止点，wanted 也归 false）',
+      await evaluate(`window.__nj.state().bgm2.paused === true && window.__nj.state().bgm2.wanted === false`));
+    assertTrue('a7 全片终点：两段 BGM 均静音',
+      await evaluate(`window.__nj.state().bgm.paused === true && window.__nj.state().bgm2.paused === true`));
+    await sleep(1200);
+    const stay = await njState();
+    assertTrue('a7 终点滞留：第二段保持停止（未复播，Q53「三不」仍然有效）', stay.bgm2.paused === true);
+    assertTrue('a7 终点滞留：不回到第一幕（#act1 仍为退场态）', (await effOpacity('#act1')) === 0);
+    assertTrue('a7 终点画面只有 bg-balck + the-end 两件（不在画面上叠加任何额外文字 / 按钮）',
+      await evaluate(`document.getElementById('act8').querySelectorAll('img').length === 2`));
+    assertTrue('a7 第七 / 八幕全程无控制台报错', errors.length === 0, errors.join(' | '));
+  }
+
+  /* ================= 用例 full4：第一 ~ 第八幕全流程（两段视频真播） =================
+     验证真实时序、终点第 5 次后移（第六幕 C5 全黑滞留 → 第八幕 THE END）后的副作用。 */
   async function caseFull4() {
     await toAct3();
     await waitFor(`document.getElementById('act3-video').currentTime > 0`, 10000, '第三幕视频开播');
@@ -2880,17 +3322,55 @@ const INK_TOP_FN = `(() => {
     await waitFor(`document.getElementById('continue6').classList.contains('in')`, 12000, 'Continue 滑入');
     await sleep(700);
     await click('#continue6');
-    await waitFor(`+getComputedStyle(document.getElementById('blackout')).opacity === 1`, 6000, '全黑到顶');
-    await sleep(200);
-    assertEq('full4 终态（第六幕末）纯黑 = 全片终', await effOpacity('#blackout'), 1, 0.01);
-    // 「全片终」标记在黑幕到顶后再滞留 400ms 才置（Q53：黑幕到顶后不回撤）
-    assertTrue('full4 终点标记已置（全黑滞留）',
-      await waitFor(`window.__nj.state().act6.done === true`, 5000, '终点标记'));
-    assertTrue('full4 末态无残留（三件已撤场）',
+    await waitFor(`window.__nj.state().act6.done === true`, 6000, 'C5 收尾完成');
+    /* ⚠️ 三件撤场里最慢的是 `#shadow6`（`.out` 400ms），它与黑幕渐入（也 400ms）**同时开始**，
+       所以 `act6.done` 一置位就来采样，会卡在它的收尾边界上（首版因此假红）。
+       等它真正归零再断言。 */
+    await waitFor(`+getComputedStyle(document.getElementById('shadow6')).opacity === 0`, 4000, 'shadow6 退场完成');
+    assertTrue('full4 C5 末态无残留（三件已撤场）',
       (await effOpacity('#shadow6')) === 0 && (await effOpacity('#goal02')) === 0 &&
       (await effOpacity('#continue6')) === 0);
+
+    /* ⚠️ v2.26：C5 之后**还有第七、八幕** ——「全黑滞留」不再是全片终点。
+       终点第 5 次后移：v1.x 第二幕末 → v2.0 第四幕末 → v2.12 第六幕末
+                  → v2.14/2.19 六幕 C5 全黑滞留 → **v2.26 第八幕 THE END 淡入完成帧**。 */
+    await waitFor(`window.__nj.state().act7.active === true`, 10000, '第七幕激活');
+    assertTrue('full4 第七幕整幕可见（z=7；幕级门控正确）', (await effOpacity('#act7')) === 1);
+    await waitFor(`window.__nj.state().act7.buttonsReady === true`, 12000, '第七幕两钮滑入完成');
+    assertTrue('full4 第七幕石墙背景已露出（靠黑幕淡出，自身不带淡入 —— 清残留态 ① 的效果）',
+      (await effOpacity('#bg-paper-choose')) === 1);
+    assertTrue('full4 第七幕主图已淡入 + 发光常驻（Q66）',
+      (await njState()).act7.allPictureChooseIn === true &&
+      (await njState()).act7.allPictureChooseGlow === true);
+    assertTrue('full4 第七幕两钮已滑入且可点',
+      (await njState()).act7.btnIdentifyIn === true &&
+      (await njState()).act7.btnCornersIn === true &&
+      (await njState()).act7.buttonsReady === true);
+    assertTrue('full4 第二段 BGM 跨第六 → 第七幕不中断（Q62）',
+      (await njState()).bgm2.paused === false);
+    await shot('full4-2-act7');
+
+    // 走 corner 这条路径（identify 那条由 bgm3 / a7 覆盖 —— Q67 的两条独立入口）
+    await click('#btn-corners');
+    await waitFor(`window.__nj.state().act8.active === true`, 12000, '第八幕激活');
+    assertTrue('full4 第八幕整幕可见（z=8）', (await effOpacity('#act8')) === 1);
+    /* ⚠️ 独立于 opacity 的一条：E1 必须真的把黑幕淡掉（漏 remove('in') 会全黑到片尾，
+       而 #act8 / #bg-balck / #the-end 的 computed opacity 全是 1、断言全绿）。 */
+    assertTrue('full4 ⚠️ E1 黑幕真的淡出（bg-balck 露出，不是仍压着一层 #blackout）',
+      await waitFor(`+getComputedStyle(document.getElementById('blackout')).opacity === 0`, 4000, '黑幕淡出到 0'));
+    await waitFor(`window.__nj.state().act8.done === true`, 12000, 'THE END 淡入完成（全片终点）');
+    const fin4 = await njState();
+    assertTrue('full4 ★ 全片终点 = 第八幕 THE END 已浮现（不再是「全黑滞留」）',
+      fin4.act8.theEndIn === true);
+    assertTrue('full4 全片终点：第二段 BGM 已停（Q62 的唯一停止点）', fin4.bgm2.paused === true);
+    assertTrue('full4 全片终点：两段 BGM 均静音', fin4.bgm.paused === true && fin4.bgm2.paused === true);
+    assertTrue('full4 全片终点：第八幕无可点元素（恒 pointer-events:none，不可套第七幕模板）',
+      (await pointerEventsOf('#act8')) === 'none');
     assertTrue('full4 全流程无控制台报错', errors.length === 0, errors.join(' | '));
-    await shot('full4-1-black');
+    await shot('full4-3-the-end');
+    const pngF4 = pngStats(path.join(OUT, 'full4-3-the-end.png'));
+    assertTrue('full4 🔍 终点截图不是全黑（THE END 白字确实在画面上；最亮 ' + (pngF4 ? pngF4.maxLuma : 'n/a') + '）',
+      !!pngF4 && pngF4.maxLuma > 200, JSON.stringify(pngF4));
   }
 
   /* ================= 用例 full2：第一 ~ 第四幕（真实播放视频） ================= */
@@ -2938,7 +3418,7 @@ const INK_TOP_FN = `(() => {
     p1: caseP1, p2: caseP2, flow: caseFlow,
     a3: caseA3, a3b: caseA3b, a3c: caseA3c, a4: caseA4, bgm: caseBgm, bgm2: caseBgm2, bgm3: caseBgm3, full2: caseFull2,
     a5: caseA5, a5b: caseA5b, full3: caseFull3,
-    a6: caseA6, a6b: caseA6b, a6c: caseA6c, full4: caseFull4,
+    a6: caseA6, a6b: caseA6b, a6c: caseA6c, a7: caseA7, full4: caseFull4,
   };
 
   for (const name of cases) {
