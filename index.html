@@ -186,7 +186,7 @@
 
   /* ---------- 后续幕预留容器（保持为空） ----------
      原 #act6-slot 已升为第六幕实际容器 #act6（见下方「第六幕」段），这里不再保留同名空位。 */
-  #act3-slot, #act7-slot { position: absolute; inset: 0; z-index: 110; pointer-events: none; }
+  #act3-slot, #act8-slot { position: absolute; inset: 0; z-index: 110; pointer-events: none; }
 
   /* ==================================================================
      第三幕：贴纸定制（z-index 3，位于 #act2(2) 之上、#blackout(100) 之下）
@@ -671,6 +671,100 @@
   #continue6.in.ready:active { transform: translateY(0) scale(.95); }
   #continue6.in.settled { transition: transform .15s ease-out, opacity .2s ease-out; }
 
+  /* ==================================================================
+     第七幕：抉择（z-index 7；需求 §10 / 计划 §6.27）
+     ==================================================================
+     ⚠️ 门控是本幕最高风险点（需求 §12.1.1 / 计划 §4.1 —— D4 的第四次翻版）：
+     #bg-paper-choose(1200x896) 是 α 恒 255 的**全屏不透明**图，而 #act7 的
+     z-index(7) 高于前六幕。容器一旦漏写 opacity:0，它会从页面载入的第一帧起
+     盖住整部 Demo（玩家看到「一打开就是石墙夜色、没有开始界面」）。
+     所以：容器默认 opacity:0 + .active 转可见；激活那一刻 #blackout 仍全黑，
+     瞬时切换即可，不加过渡更安全（同 #act3 ~ #act6）。
+
+     幕内层级（需求 §12.1）：
+       1 bg-paper-choose < 30 all-picture-choose（含常驻外发光）< 40 两枚按钮
+     三件互不重叠（需求 §3.8），层序只是规范：按钮必须高于主图，
+     避免日后微调位置时被压住。
+
+     ⚠️ 背景**刻意不带淡入 / 位移**（对照 #act6 的 #bg-picture）——
+        它的出场完全由「黑幕淡出」完成；若照抄第五幕 #bg-inside 那样自带淡入，
+        会变成「黑幕淡完画面还是空的、再等一段才浮出背景」
+        （第六幕刻意绕开的同一个坑，需求 §3.8 结论 ① / §10.2 · D1）。 */
+  #act7 { opacity: 0; z-index: 7; pointer-events: none; }
+  #act7.active { opacity: 1; pointer-events: auto; }
+
+  #bg-paper-choose {
+    position: absolute; left: 0; top: 0; width: 1200px; height: 896px;
+    z-index: 1;
+    pointer-events: none;              /* 常驻不透明底，不吃点击 */
+  }
+
+  /* 主图（455x369，372.5 / 228）：出现动作 = 纯淡入 400ms，不带位移、不缩放。
+     外发光复用第六幕的 picGlow 关键帧（drop-shadow + brightness 呼吸，1.6s 循环）。
+     ⚠️ .glow **挂上后不摘** —— 与 #all-picture 同一个坑：CSS 的 animation 是
+        「整体替换、不叠加」，用 animationend 摘类会让动画重启、相位归零（可见亮度闪）。 */
+  #all-picture-choose {
+    position: absolute; left: 372.5px; top: 228px; width: 455px; height: 369px;
+    z-index: 30;
+    opacity: 0;
+    transition: opacity .4s ease-out;
+    pointer-events: none;
+  }
+  #all-picture-choose.in { opacity: 1; }
+  #all-picture-choose.glow { animation: picGlow 1.6s ease-in-out infinite; }
+
+  /* 两枚按钮（都 489 宽、都水平居中 → 水平同槽 left 355.5）：
+       identify 489x93 / top 641（距底 162）、corners 489x92 / top 762（距底 42）
+     动作 = 「自画布下沿之外自下而上滑入」500ms ease-out。
+     ⚠️ 起手位移**按各自落点算** translateY(896 − top) = 255 / 134 px，
+        绝不沿用全片按钮规范写死的 150px —— 150px 只推到 791、下缘 884 仍在画布内，
+        会「先露出一截再上升」；本幕落点偏高，必须各自算（需求 §10.2 · D3）。
+     滑入完成前 pointer-events:none（不可点）；滑完后 JS 加 .ready 放行。 */
+  .btn7 { transform-origin: center center; }
+  #btn-identify, #btn-corners {
+    position: absolute; left: 355.5px; z-index: 40;
+    opacity: 0;
+    transition: opacity .5s ease-out, transform .5s ease-out;
+    pointer-events: none;
+  }
+  #btn-identify { top: 641px; width: 489px; height: 93px; transform: translateY(255px); }
+  #btn-corners  { top: 762px; width: 489px; height: 92px; transform: translateY(134px); }
+  #btn-identify.in, #btn-corners.in { opacity: 1; transform: translateY(0); }
+  #btn-identify.ready, #btn-corners.ready { pointer-events: auto; cursor: pointer; }
+  #btn-identify.ready:hover,  #btn-corners.ready:hover  { transform: translateY(0) scale(1.05); }
+  #btn-identify.ready:active, #btn-corners.ready:active { transform: translateY(0) scale(.95); }
+  /* 一次性屏蔽：任一枚被点击后**同帧**给两枚都挂上（防连点，需求 §10.4 / Q67） */
+  #btn-identify.dead, #btn-corners.dead { pointer-events: none; cursor: default; }
+
+  /* ==================================================================
+     第八幕：终幕（z-index 8；需求 §11 / 计划 §6.28）
+     ==================================================================
+     ⚠️ 本幕**没有任何可点元素**（需求 §11.3）→ 容器**恒** pointer-events:none，
+        激活时只改 opacity、绝不放行点击（与 #act5-video 同类处理）。
+        ⚠️ 不可照抄第七幕那套「初始 none + .active 转 auto」——两者不能同模板。
+     ⚠️ #bg-balck 实测 #101010，与 #blackout(#000) 几乎同色 → 「黑幕 → bg-balck」
+        视觉上近似一次不闪的切换；但 E1 那一步**不能省**，否则 state().act8.active
+        恒为 false、第八幕的门控用例失去意义（需求 §3.8 结论 ② / §11.1 E1）。
+     幕内层级：1 bg-balck < 30 the-end。 */
+  #act8 { opacity: 0; z-index: 8; pointer-events: none; }
+  #act8.active { opacity: 1; }          /* 只改 opacity，绝不放行点击 */
+
+  #bg-balck {
+    position: absolute; left: 0; top: 0; width: 1200px; height: 896px;
+    z-index: 1;
+  }
+
+  /* THE END（378x81，411 / 407.5 = 水平 + 垂直双向居中，✅ Q63）：
+     「浮现」= 纯淡入 600ms ease-out，不带位移、不缩放、不发光。
+     该帧即**全片终点**（也是全片唯一的 BGM 停止点）。 */
+  #the-end {
+    position: absolute; left: 411px; top: 407.5px; width: 378px; height: 81px;
+    z-index: 30;
+    opacity: 0;
+    transition: opacity .6s ease-out;
+  }
+  #the-end.in { opacity: 1; }
+
   /* ---------- 启动失败兜底提示 ----------
      本页所有元素默认 opacity:0，靠 JS 加 .in 才显示。
      脚本一旦没跑起来，页面就是「全黑 + 点不动 + 毫无提示」，
@@ -880,12 +974,40 @@
       <img id="continue6" class="btn6" src="assets/screen4/Continue.png" alt="Continue">
     </section>
 
+    <!-- ==================================================================
+         第七幕：抉择（z-index 7；需求 §10）
+         ==================================================================
+         幕内层级：1 石墙夜色背景 < 30 主图（含常驻外发光）< 40 两枚按钮
+         ⚠️ #bg-paper-choose **不带 .in** —— 它是本幕「一开始就在」的常驻底，
+            「露出背景」完全由黑幕淡出完成（同第六幕 #bg-picture）。
+         ⚠️ 三件**各自**带 opacity:0 门控（主图 / 两枚按钮）—— #act7 的 .active
+            从 D1 起常驻，幕级门控兜不住它们；漏了会让三件在黑幕一淡出的同一帧齐现，
+            D2 / D3 的出现节奏全部丢失（需求 §12.1.1 v2.25 追加）。 -->
+    <section id="act7" class="scene">
+      <img id="bg-paper-choose" src="assets/screen8/bg-paper-choose.png" alt="">
+      <img id="all-picture-choose" src="assets/screen8/all-picture-choose.png" alt="">
+      <img id="btn-identify" class="btn7" src="assets/screen8/identify.png" alt="Search for her identity">
+      <img id="btn-corners"  class="btn7" src="assets/screen8/corners.png"  alt="Exploring the unknown corners">
+    </section>
+
+    <!-- ==================================================================
+         第八幕：终幕（z-index 8；需求 §11）—— ★ 全片终点 ★
+         ==================================================================
+         幕内层级：1 bg-balck < 30 the-end
+         ⚠️ 本幕无可点元素 → #act8 恒 pointer-events:none（CSS 里写死，不可套第七幕模板）。
+         ⚠️ #the-end 必须自带 opacity:0 门控，否则它会在 bg-balck 露出的**同一帧**
+            就亮着，丢掉「先黑底、后浮现」（需求 §12.1.1 v2.25 追加）。 -->
+    <section id="act8" class="scene">
+      <img id="bg-balck" src="assets/screen9/bg-balck.png" alt="">
+      <img id="the-end"  src="assets/screen9/the-end.png"  alt="THE END">
+    </section>
+
     <!-- ========== 遮黑层 ========== -->
     <div id="blackout"></div>
 
     <!-- ========== 后续幕预留位（保持为空） ========== -->
     <div id="act3-slot"></div>
-    <div id="act7-slot"></div>
+    <div id="act8-slot"></div>
 
   </div>
 </div>
@@ -1105,6 +1227,21 @@
     return PUZZLE_DIR + id + '.png';
   }));
 
+  // 第七幕素材（screen8/ 4 件，≈ 2.04MB —— bg-paper-choose 单件 1.69MB）：
+  // 在第六幕 C5 点 Continue 的黑幕转场期间发起预取（计划 §6.26）。
+  var ACT7_IMAGES = [
+    'assets/screen8/bg-paper-choose.png',
+    'assets/screen8/all-picture-choose.png',
+    'assets/screen8/identify.png',
+    'assets/screen8/corners.png'
+  ];
+
+  // 第八幕素材（screen9/ 2 件，≈ 11KB）：在第七幕点击后的黑幕转场期间发起预取。
+  var ACT8_IMAGES = [
+    'assets/screen9/bg-balck.png',
+    'assets/screen9/the-end.png'
+  ];
+
   /* ================= DOM ================= */
   var stage      = document.getElementById('stage');
 
@@ -1162,6 +1299,18 @@
   var goal02       = document.getElementById('goal02');
   var btnContinue6 = document.getElementById('continue6');
 
+  /* ---- 第七幕专有（需求 §10） ---- */
+  var act7             = document.getElementById('act7');
+  var bgPaperChoose    = document.getElementById('bg-paper-choose');
+  var allPictureChoose = document.getElementById('all-picture-choose');
+  var btnIdentify      = document.getElementById('btn-identify');
+  var btnCorners       = document.getElementById('btn-corners');
+
+  /* ---- 第八幕专有（需求 §11） ---- */
+  var act8     = document.getElementById('act8');
+  var bgBalck  = document.getElementById('bg-balck');
+  var theEnd   = document.getElementById('the-end');
+
   var blackout   = document.getElementById('blackout');
 
   /* 调色板 12 张贴纸：槽位坐标的唯一来源是 HTML 的内联样式，避免两处各写一份 */
@@ -1191,6 +1340,8 @@
   var preload34 = null;
   var preload5 = null;
   var preload6 = null;
+  var preload7 = null;
+  var preload8 = null;
   var act5Done = false;      // 第五幕是否已开始，防重复触发
   var rotOverride = null;    // 测试钩子：固定落定旋转角
 
@@ -1207,6 +1358,12 @@
   var hintTimer    = null;   // 手动参考图的 3s 计时器（重复点击 clearTimeout 后重开）
   var act6Started  = false;
   var act6Done     = false;
+
+  /* ---- 第七 / 八幕专有状态（开发计划 §6.27 / §6.28） ---- */
+  var act7Started = false;
+  var act7Chosen  = false;   // 一次性锁：两枚按钮共用，只接受第一次点击（Q67）
+  var act8Started = false;
+  var act8Done    = false;   // 供测试钩子读取（＝全片终点已到达）
 
   /* ================= 工具 ================= */
   function sleep(ms) {
@@ -1328,8 +1485,11 @@
     try { bgm.pause(); bgm.currentTime = 0; } catch (e) { /* ignore */ }
   }
 
-  /* ---- 第二段 BGM：第五幕「古堡主题」（需求 §3.5.4 / Q59–Q61 / 计划 §6.7.2）----
-     起播 = 第五幕 B1 户外定格图淡入的首帧；停止 = 第六幕 C5 点 Continue 的同一帧（全片终点）。
+  /* ---- 第二段 BGM：第五幕「古堡主题」（需求 §3.5.4 / Q59–Q61 / v2.26 · Q62 / 计划 §6.7.2）----
+     起播 = 第五幕 B1 户外定格图淡入的首帧；
+     停止 = **第八幕 the-end 淡入完成的那一帧**（＝全片终点，v2.26 · Q62 —— 全片唯一停止点）。
+     ⚠️ 原「第六幕 C5 点 Continue 的同一帧停止」（v2.24 · Q60）**已作废** —— 那是旧终点的位置；
+        第二段要跨 C5 → 第七幕 → 第八幕的两次幕间转场**一路播下去**（bgm3 用例守着）。
      ⚠️ 刻意不复用 bgm（第一段）：既有测试里约 20 条 state().bgm.* 断言靠它零回归。
      参数 Q61：volume 0.35 + loop = true + 硬起硬停（不写任何淡入淡出）。 */
   var bgm2 = new Audio(BGM2_SRC);
@@ -1434,6 +1594,26 @@
   function preloadAct6() {
     if (!preload6) preload6 = Promise.all(ACT6_IMAGES.map(loadImage));
     return preload6;
+  }
+
+  /* 第七 / 八幕素材（v2.26 新增；需求 §2 / 计划 §6.26）
+     ⚠️ 与前几幕的**关键不同**：这两幕没有可等待的演出缓冲（黑幕只剩 900ms），
+        而 bg-paper-choose 单件 1.69MB → 必须「黑幕淡出前 await 就绪」，
+        因此这里**要 await**（不像 preloadAct34 / preloadAct5 / preloadAct6 那样
+        「发了就不管」）。2.5s 超时即放行：超时或单张加载失败都照常演出，
+        绝不卡住流程（需求 §2 —— 宁可有半秒空窗，也不能停住）。 */
+  function preloadAct7() {
+    if (!preload7) {
+      preload7 = Promise.race([Promise.all(ACT7_IMAGES.map(loadImage)), sleep(2500)]);
+    }
+    return preload7;
+  }
+
+  function preloadAct8() {
+    if (!preload8) {
+      preload8 = Promise.race([Promise.all(ACT8_IMAGES.map(loadImage)), sleep(2500)]);
+    }
+    return preload8;
   }
 
   /* ================= 打字机 ================= */
@@ -2212,7 +2392,12 @@
   }
 
   /* C4 完成态 + C5 收尾：四拍与时长**逐项沿用第四幕**（runAct4() 末段）。
-     终点 = 点击 Continue → 黑幕渐入 → 全黑滞留（Q53）。 */
+     ⚠️ v2.26：C5 **不再**是全片终点 —— 点击 Continue 后黑幕 400ms 渐入，
+        随即**转场进入第七幕**（Q53 的「全黑滞留＝终点」已被 Q62 / 第七八幕取代）。
+        ⚠️ 与之配套：stopBGM2() **已迁出本函数**（后移到第八幕 E2 的 the-end 淡入完成帧），
+           否则第七、八幕全程无声，而旧断言**仍会通过**（断言仍绿、语义已废）。
+        C5 留下的两个「旧终点残留态」（#blackout 的 .in 与 .fast）由第七幕接手时清理，
+        详见 runAct7() / chooseToAct8() 的逐行注释（需求 §10.2 · D1）。 */
   function runAct6Finish() {
     return anim(350, function () {})        // 第 9 张落位后停顿（需求 §9.6 的 300–400，取中值）
       .then(function () {
@@ -2264,14 +2449,23 @@
           shadow6.classList.add('out');           // 退场压至 400ms
           btnContinue6.classList.remove('in');
           btnContinue6.classList.add('out');      // 退场压至 150ms
-          blackout.classList.add('in');           // 400ms 渐入
-          stopBGM2();                             // Q60：第二段与黑幕同一帧停止（＝全片终点）
-                                                  //   第一段早在第四幕末已停，此处不动 bgm
+          blackout.classList.add('in');           // 400ms 渐入（此刻 .fast 正挂着，正好要它）
+          /* ⚠️⚠️ v2.26 · Q62：这里**不再** stopBGM2() ——
+             全片唯一的 BGM 停止点已后移到第八幕 E2「the-end 淡入完成帧」（需求 §11.1）。
+             留在本帧会让第七、八幕全程无声，而旧断言「点 Continue 时 bgm2.paused」
+             **仍然会通过**（最危险的一种失效：断言仍绿、语义已废）。
+             第一段 bgm 早在第四幕末已停，同样不写。
+             ⚠️ 同帧发起第七幕预取：2.04MB，只有这 900ms 黑幕做缓冲，必须并行起来。 */
+          preloadAct7();
         });
       })
-      // 全黑滞留 = 全片终点（Q53）：不重播、不显示额外文字 / 按钮、不回到第一幕
-      .then(function () { return sleep(400); })
-      .then(function () { act6Done = true; });
+      /* v2.26：黑幕到顶后**不再滞留** —— 下一步交给 runAct7() 做
+         「全黑停留 500ms → #act7 激活」（需求 §10.2 · D1）。
+         ⚠️ 这里**刻意不再有** sleep(400)：全黑停留统一由 runAct7 的 500ms 承担。
+            若保留，会变成「400ms 渐入 + 400ms 旧滞留 + 500ms 停留」＝多黑 400ms，
+            与需求 D1 明写的「全黑停留 500ms」不符。 */
+      .then(function () { act6Done = true; })
+      .then(function () { return runAct7(); });   // 🆕 v2.26：→ 第七幕（衔接全片终点）
   }
 
   // 第六幕总控：串起 C1 → C5（分幕结构与第三幕同构，只是多一步）
@@ -2283,6 +2477,111 @@
       .then(runPuzzlePlay)
       .then(runAct6Finish);
   }
+
+  /* ================= 第七幕：抉择（D1–D3；需求 §10 / 计划 §6.27） =================
+     分幕函数：runAct7() 入场链；onChooseIdentify() / onChooseCorners() **两个独立入口**
+     （✅ v2.26 · Q67），两者内部调用**同一个** chooseToAct8() 收尾 ——
+     日后要分支成两个结局时**只改函数体、不动事件绑定**。
+
+     ⚠️ 本幕最容易踩的一步是「接手第六幕 C5 留下的旧终点残留态」（需求 §10.2 · D1）：
+        C5 是旧的全片终点，它的 blackout.add('in') **从不摘除**、C1 挂的 .fast
+        **也一直没摘**。两处的处置**恰好相反**（D1 不摘 .fast、D3 才摘），别记反。 */
+  function runAct7() {
+    act7Started = true;
+    // D0：等第七幕素材就绪（C5 第 4 拍已同帧发起预取，≤ 2.5s 超时即放行）
+    return preloadAct7()
+      // D1：全黑停留 500ms → #act7 激活（此刻仍全黑，可瞬时切换）
+      .then(function () { return sleep(500); })
+      .then(function () {
+        // ⚠️⚠️ 清掉「旧终点残留态 ①」：C5 末尾的 blackout.add('in') 从不摘除 →
+        //    不摘则黑幕 opacity 停在 1、bg-paper-choose **永远看不到**
+        //    （而所有既有断言都不会失败：没人断言过 blackout 的 opacity）。
+        blackout.classList.remove('in');
+        // ⚠️「残留态 ②」（.fast，transition-duration .4s）此刻**仍挂着**：
+        //    D1 的 400ms 淡出**正好要它** → 这里【不要】摘、【也不要】再加一次。
+        //    （要摘的是 D3 那次 700ms 幕间转场，见 chooseToAct8。）
+        act7.classList.add('active');
+      })
+      .then(function () { return sleep(400); })   // 黑幕淡出 400ms（背景由它露出）
+      // D2：主图淡入 400ms（纯淡入，不带位移、不缩放）+ 外发光（常驻，只加不摘）
+      .then(function () { return anim(400, function () { allPictureChoose.classList.add('in'); }); })
+      .then(function () { return anim(0, function () { allPictureChoose.classList.add('glow'); }); })
+      // D3：两枚按钮**同帧**自下而上滑入 500ms（✅ Q64：同时滑入，不取错峰 120ms）
+      .then(function () {
+        return anim(500, function () {
+          btnIdentify.classList.add('in');
+          btnCorners.classList.add('in');
+        });
+      })
+      .then(function () {
+        // 滑入**完成之后**才放行点击（此前 pointer-events:none，点不动）
+        btnIdentify.classList.add('ready');
+        btnCorners.classList.add('ready');
+      });
+  }
+
+  /* ✅ Q67：两条独立路径 → 共用同一收尾。
+     ⚠️ 日后要分支成两个结局，**只改 chooseToAct8 的函数体**，不动事件绑定。 */
+  function onChooseIdentify() { chooseToAct8('identify'); }
+  function onChooseCorners()  { chooseToAct8('corners');  }
+
+  function chooseToAct8(which) {
+    if (act7Chosen) return;                  // 只接受第一次点击（两枚共用一把一次性锁）
+    act7Chosen = true;
+    btnIdentify.classList.add('dead');       // 同帧把两枚一起置为不可再点（防连点）
+    btnCorners.classList.add('dead');
+    playSound();                             // ♫ audio/toggle.wav
+    preloadAct8();                           // 与黑幕渐入同一帧发起，不 await
+    anim(700, function () {                  // ⚠️ 渐入 700ms（与 C5 那次的 400ms 不同，别混用）
+      // ⚠️ 残留态 ②：C1 挂的 .fast 一直没摘 → 不摘则本步**静默**跑成 400ms，
+      //    而没有任何断言会报错。写法与第五幕 B8 → 第六幕完全一致（index.html 的 B8 段）。
+      blackout.classList.remove('fast');
+      blackout.classList.add('in');
+    })
+      .then(function () { return sleep(500); })   // 全黑停留 500ms
+      .then(function () { return runAct8(); });   // → 第八幕（跨幕转场）
+    /* ⚠️ 本幕**不需要任何撤场动作**：第七幕元素全部保留（不淡出、不删 .active）——
+       黑幕 700ms 到顶即完全遮蔽，随后第八幕的 bg-balck（α 恒 255 的不透明全屏图）
+       会永久盖住它们。靠幕容器层级即可，不需要像 C5 那样在**同幕内**撤三件。
+       （这是与第六幕 C5 的一处关键不同，需求 §10.2 · D3。） */
+  }
+
+  /* ================= 第八幕：终幕（E1–E2；需求 §11 / 计划 §6.28） =================
+     ⚠️ 本幕是**新的全片终点**（取代第六幕 C5 的「全黑滞留」，Q53 → v2.26 · Q62）。
+     只做两件事：bg-balck 露出 + the-end 浮现 —— 不加引导手 / 提示文字 / 重播按钮 / 音效。 */
+  function runAct8() {
+    act8Started = true;
+    // E1：等第八幕素材就绪（D3 点击时已同帧发起预取，≤ 2.5s 超时即放行）
+    return preloadAct8()
+      .then(function () {
+        /* ⚠️ 与第七幕 D1 **恰好相反**：这次要「把 .fast 挂回」。
+           理由：D3 为做 700ms 幕间转场把 .fast 摘掉了 → 此处过渡时长已回到默认 0.7s，
+           而 E1 的淡出要 400ms → 必须重新挂上（照第三 ~ 第六幕 C1 的写法）。
+           忘加则黑幕以 700ms 慢淡，**不会有任何断言报错**，只是节奏变拖。
+           ⚠️⚠️ 而 remove('in') 这一步**绝不可漏** —— 它与第七幕 D1 同理：
+               D3 刚给黑幕加过 .in（幕间转场），此处不摘则黑幕 opacity 恒为 1，
+               画面**全黑到片尾**；而 `state().act8.active`、`#act8` / `#bg-balck` /
+               `#the-end` 的 computed opacity **全都是 1，一条断言都不会失败**
+               （第六幕 C1 的写法就是「挂 .fast + 摘 .in」成对出现的）。 */
+        blackout.classList.add('fast');
+        act8.classList.add('active');       // 此刻仍全黑，瞬时切换
+        blackout.classList.remove('in');    // ← 黑幕淡出的开始（400ms）
+      })
+      .then(function () { return sleep(400); })   // 黑幕淡出 400ms（bg-balck 由它露出）
+      // E2：THE END 浮现（纯淡入 600ms，不带位移 / 缩放 / 发光）→ 该帧即全片终点
+      .then(function () { return anim(600, function () { theEnd.classList.add('in'); }); })
+      .then(function () {
+        stopBGM2();          // ★ v2.26 · Q62：全片唯一的 BGM 停止点（＝全片终点）
+                             //   第一段早在第四幕末已停；第二段自第五幕 B1 起连播至此
+        act8Done = true;     // 供测试钩子读取
+      });
+  }
+
+  /* 第七幕两枚按钮的点击绑定（✅ Q67：两条独立入口 → 共用同一收尾）。
+     ⚠️ 在模块顶层就绑定是安全的：#btn-identify / #btn-corners 在拿到 .ready 之前
+        一直是 pointer-events:none，连整个 #act7 都是 none —— 根本点不到。 */
+  btnIdentify.addEventListener('click', onChooseIdentify);
+  btnCorners.addEventListener('click', onChooseCorners);
 
   /* ================= 主流程 ================= */
   function main() {
@@ -2383,9 +2682,14 @@
       .then(runAct5)
 
       // 22. 第六幕：拼碎纸 / 修复古画 → C1 入场 → C2 右侧 UI → C3 拼图（9/9）
-      //     → C4 发光 → C5 蒙黑 + Goal 2 + Continue → 全黑滞留（**全片终**）
+      //     → C4 发光 → C5 蒙黑 + Goal 2 + Continue → 黑幕转场
+      //     ⚠️ v2.26：C5 **不再是终点** —— 点击 Continue 后黑幕到顶即转场进第七幕
       .then(bindPuzzlePlay)
       .then(runAct6)
+      // 23. 第七幕 → 第八幕（均由上面的 Promise 链自然接续，故此处不再写：
+      //     runAct6Finish 末尾已 `return runAct7()`，chooseToAct8 再 `return runAct8()`）
+      //     第七幕：抉择（进场 → 主图 + 常驻发光 → 两枚按钮滑入 → 点击任一 → 700ms 黑幕转场）
+      //     第八幕：终幕（bg-balck 露出 → THE END 淡入 600ms）＝ ★ 全片终点 ★
 
       .catch(function (err) {
         reportFailure('运行出错', (err && (err.stack || err.message)) || String(err));
@@ -2469,6 +2773,27 @@
           continue6Ready: btnContinue6.classList.contains('ready'),
           uiOut: act6.classList.contains('ui-out'),               // Q55：本幕**必须**恒为 false
           done: act6Done
+        },
+        // 第七幕状态（需求 §10）—— 供测试断言，只读
+        act7: {
+          started: act7Started,
+          active: act7.classList.contains('active'),
+          bgPaperSrc: bgPaperChoose.getAttribute('src'),
+          allPictureChooseIn: allPictureChoose.classList.contains('in'),
+          allPictureChooseGlow: allPictureChoose.classList.contains('glow'),  // Q66：应「挂上后不摘除」
+          btnIdentifyIn: btnIdentify.classList.contains('in'),
+          btnCornersIn: btnCorners.classList.contains('in'),
+          buttonsReady: btnIdentify.classList.contains('ready') && btnCorners.classList.contains('ready'),
+          chosen: act7Chosen,                       // 一次性锁：任一按钮被点过即为 true
+          chosenDead: btnIdentify.classList.contains('dead') && btnCorners.classList.contains('dead')
+        },
+        // 第八幕状态（需求 §11）—— 供测试断言，只读
+        act8: {
+          started: act8Started,
+          active: act8.classList.contains('active'),
+          bgBalckSrc: bgBalck.getAttribute('src'),
+          theEndIn: theEnd.classList.contains('in'),
+          done: act8Done                            // ＝全片终点已到达
         },
         // BGM 状态（需求 §3.5 / Q27–Q30）—— 供测试断言，只读
         bgm: {
