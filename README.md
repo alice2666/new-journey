@@ -44,7 +44,7 @@ new-journey/
 │  ├─ music-ancient-s.wav  # 第二段 BGM「古堡主题」
 │  └─ toggle.wav           # 交互音效
 ├─ docs/                   # 设计文档（见下）
-└─ .workbuddy/tools/       # 自动化验收脚本（开发过程产物）
+└─ .gitignore              # Git 忽略规则
 ```
 
 ## 开发文档
@@ -56,18 +56,13 @@ new-journey/
 
 ## 质量保障
 
-项目配有一套基于 **Chrome DevTools Protocol** 的自动化视觉验收脚本（零安装，直连系统 Edge / Chrome）：
+本项目在开发期配有一套基于 **Chrome DevTools Protocol** 的自动化视觉验收脚本（零安装，直连系统 Edge / Chrome），覆盖全片 8 幕的完整交互链路：
 
-- `.workbuddy/tools/test.js` —— **20 个用例、916 项断言**，覆盖全片流程、坐标几何、动画采样、BGM 生命周期与像素级截图体检。
-- `.workbuddy/tools/boot-check.js` —— **19 项**启动兜底与故障自诊断验证（素材 404、旧引擎、缩放适配等场景）。
-- `.workbuddy/tools/probe-bgm2.js` —— 浏览器自动播放策略的独立探针。
+- **20 个用例、916 项断言** —— 覆盖全片流程、坐标几何、动画采样、BGM 生命周期与像素级截图体检。
+- **19 项启动自检** —— 验证启动兜底与故障自诊断（素材 404、旧引擎、缩放适配等场景）。
+- **独立自动播放探针** —— 用于验证浏览器自动播放策略下的真实表现。
 
-运行方式（需本机有 Node）：
-
-```bash
-node .workbuddy/tools/test.js
-node .workbuddy/tools/boot-check.js
-```
+> 验收脚本属于开发过程产物，未随本仓库发布；完整的方法论、坐标总表与逐版交付记录可参阅 [`docs/02-开发计划.md`](docs/02-开发计划.md)。
 
 ## 运行方式
 
