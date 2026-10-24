@@ -1092,7 +1092,7 @@
 
   var loadingHintShown = false;
 
-  // 6s：仍未出第一幕 —— 不急着判死刑，先给一个温和的「正在加载」提示
+  // 3s：仍未出第一幕 —— 不急着判死刑，先给一个温和的「正在加载」提示
   setTimeout(function () {
     if (!fallbackBox) return;
     var bad = brokenAssets();
@@ -1112,7 +1112,7 @@
     var s6 = fallbackBox.querySelector('.fb-sub');
     if (s6) s6.textContent = '首次打开需要下载约 4 MB 素材，请稍候（通常 10–20 秒）。';
     fallbackBox.hidden = false;
-  }, 6000);
+  }, 3000);
 
   // 20s：还没就绪，才判定为真失败
   setTimeout(function () {
