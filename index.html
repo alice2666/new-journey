@@ -799,6 +799,11 @@
     margin: 22px 0 0; padding: 14px 16px;
     background: #16202c; border-left: 3px solid #ffd166; border-radius: 4px; color: #cfe0f5;
   }
+  /* 加载中的温和态：标题转蓝，隐藏技术信息与「发给开发者」提示 */
+  #fallback.loading h1 { color: #8fd3ff; }
+  #fallback.loading .fb-row,
+  #fallback.loading #fb-detail,
+  #fallback.loading .fb-tip { display: none; }
 </style>
 </head>
 <body>
@@ -1038,6 +1043,9 @@
       put('fb-size', window.innerWidth + ' × ' + window.innerHeight);
       put('fb-scale', window.devicePixelRatio);
     } catch (e) { /* 忽略 */ }
+    fallbackBox.classList.remove('loading');
+    var fbSub = fallbackBox.querySelector('.fb-sub');
+    if (fbSub) fbSub.textContent = '脚本在渲染出第一幕之前就停止了，所以你会看到一片黑、并且点不动。';
     fallbackBox.hidden = false;
   }
 
@@ -1063,7 +1071,10 @@
         但图片根本没解码出来（资源 404 / 路径不对），画面照样是全黑。
         所以既要查「有没有跑起来」，也要查「图有没有真的出来」。 */
   var booted = false;
-  window.__njMarkBooted = function () { booted = true; };
+  window.__njMarkBooted = function () {
+    booted = true;
+    if (fallbackBox) fallbackBox.hidden = true;   // 第一幕已出 → 撤掉兜底面板
+  };
 
   // 首屏 7 个素材对应的元素。第三、四幕是懒加载，此处刻意不查，避免误报。
   function brokenAssets() {
@@ -1079,7 +1090,11 @@
     return bad;
   }
 
+  var loadingHintShown = false;
+
+  // 6s：仍未出第一幕 —— 不急着判死刑，先给一个温和的「正在加载」提示
   setTimeout(function () {
+    if (!fallbackBox) return;
     var bad = brokenAssets();
     if (bad.length) {
       reportFailure(
@@ -1089,13 +1104,34 @@
       );
       return;
     }
-    if (!booted) {
-      reportFailure(
-        '启动超时',
-        '脚本已执行，但 6 秒内仍未渲染出第一幕。\n当前地址：' + location.href
-      );
-    }
+    if (booted) return;   // 已正常启动，无需任何提示
+    loadingHintShown = true;
+    fallbackBox.classList.add('loading');
+    var t6 = document.getElementById('fb-title');
+    if (t6) t6.textContent = '正在加载素材…';
+    var s6 = fallbackBox.querySelector('.fb-sub');
+    if (s6) s6.textContent = '首次打开需要下载约 4 MB 素材，请稍候（通常 10–20 秒）。';
+    fallbackBox.hidden = false;
   }, 6000);
+
+  // 20s：还没就绪，才判定为真失败
+  setTimeout(function () {
+    if (!fallbackBox) return;
+    var bad2 = brokenAssets();
+    if (bad2.length) {
+      reportFailure(
+        '素材未能加载',
+        '第一幕的图片没能显示（共 ' + bad2.length + ' 个）：\n  ' + bad2.join('\n  ') +
+        '\n\n本页需要 index.html 与 assets/ 目录保持在同一个文件夹内。\n当前地址：' + location.href
+      );
+      return;
+    }
+    if (booted || !loadingHintShown) return;
+    reportFailure(
+      '启动超时',
+      '脚本已执行，但 20 秒内仍未渲染出第一幕。\n当前地址：' + location.href
+    );
+  }, 20000);
 
   /* ================= 常量 ================= */
   var STAGE_W = 1200;
@@ -1525,10 +1561,13 @@
   /* ================= 预加载 ================= */
   function loadImage(src) {
     return new Promise(function (res) {
+      var done = false;
+      function fin() { if (!done) { done = true; res(); } }
       var img = new Image();
-      img.onload = function () { res(); };
-      img.onerror = function () { res(); };
+      img.onload = fin;
+      img.onerror = fin;
       img.src = src;
+      setTimeout(fin, 15000);   // 兜底：单张图 pending 也不卡死开场
     });
   }
 
